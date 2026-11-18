@@ -2,6 +2,8 @@
 
 Portable Harbor supports Microsoft sign-in and two optional personal connections. A team can use Google sign-in and connect Outlook, use Microsoft sign-in on its own, or offer both sign-in buttons. Connections are available in a user's private workspace. A workspace administrator cannot connect a teammate's mailbox for them.
 
+For an existing Harbor installation, take the matched database and file backup described in the [self-host guide](self-host.md). Build the new image, set `HARBOR_IMAGE` to its tag, and run `docker compose -f compose.portable.yaml run --rm web node scripts/portable-web.mjs migrate` before starting it. The migration adds Microsoft identities to the existing database. Google users continue to reach their records with their original sign-in.
+
 ## Sign in with Microsoft
 
 1. In **Microsoft Entra ID → App registrations → New registration**, create a sign-in app for this Harbor installation. For one Microsoft 365 organization, choose **Accounts in this organizational directory only**. For personal Microsoft accounts, choose a registration that supports them and use Microsoft's consumer tenant ID `9188040d-6c67-4c5b-b112-36a304b66dad`.

@@ -22,7 +22,7 @@ The end-to-end suite starts PostgreSQL, simulated identity and mail providers, a
 
 ## Dependency status
 
-On November 18, 2026, the production npm audit reported zero findings. The build toolchain still includes picomatch, for which an upstream fix was pending. The Docker image bundles the production HTTP server and removes the build tools. Build only trusted source and configuration. Run `npm audit --omit=dev` for runtime dependencies and `npm audit --include=dev` to include the build chain. [Upstream advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+Run `npm audit --omit=dev` for the production dependency tree and `npm audit --include=dev` for the build toolchain. The Dockerfile bundles the production HTTP server and removes the development dependencies from the runtime image. Build from source and configuration you trust.
 
 ## License
 
