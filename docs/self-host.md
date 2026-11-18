@@ -2,6 +2,8 @@
 
 Install Harbor on a **new, empty database**, then verify that two teammates can share a record. For an existing installation, [take a matched backup before upgrading](#back-up-and-recover).
 
+For Microsoft sign-in or personal Outlook connections, follow the [Microsoft sign-in and Outlook setup](microsoft-outlook.md).
+
 ## What you bring
 
 | Resource | What Harbor needs |
@@ -9,7 +11,7 @@ Install Harbor on a **new, empty database**, then verify that two teammates can 
 | Docker host with Compose | An HTTPS reverse proxy on that host pointing to `127.0.0.1:8787`. Configure it to overwrite the forwarded host and scheme. |
 | PostgreSQL 18 | An empty UTF-8 database on a private network reachable from the web container. |
 | File storage | A private S3-compatible bucket with an HTTPS endpoint. The web credential needs bucket checks and object read/write access. |
-| Google sign-in | A Google web application client for this installation and two accounts you can use to try sharing. Sign-in only uses name, email and profile. |
+| Sign-in | A Microsoft Entra Web client, a Google web client, or both. Use two test accounts to try sharing. [Microsoft sign-in and Outlook](microsoft-outlook.md) |
 
 Supply your own database, bucket and identity client. The same Compose setup works independently of Railway.
 
@@ -23,15 +25,14 @@ export HARBOR_IMAGE="harbor-portable:$(git rev-parse --short HEAD)"
 docker build -t "$HARBOR_IMAGE" .
 ```
 
-Open `.harbor/compose/web.env` in your editor. The setup command leaves an existing file alone. Enter the web database URL, your exact HTTPS origin without a trailing slash, and the bucket settings. If your provider puts the bucket in the hostname, use `HARBOR_S3_ADDRESSING=virtual-hosted` and enter the base endpoint **without** the bucket name. Leave the three Google settings empty for now.
+Open `.harbor/compose/web.env` in your editor. The setup command leaves an existing file alone. Enter the web database URL, your exact HTTPS origin without a trailing slash, and the bucket settings. If your provider puts the bucket in the hostname, use `HARBOR_S3_ADDRESSING=virtual-hosted` and enter the base endpoint **without** the bucket name. Configure sign-in in step 2.
 
 ```sh
 docker compose -f compose.portable.yaml config --quiet
 docker compose -f compose.portable.yaml run --rm web node scripts/portable-web.mjs migrate
-docker compose -f compose.portable.yaml run --rm web node scripts/portable-web.mjs doctor web --before-google
 ```
 
-The first command checks the Compose file without printing its secrets. Migration creates the tables. If the web account cannot create tables, set the migration role’s `DATABASE_URL` in your shell and use `docker compose -f compose.portable.yaml run --rm -e DATABASE_URL web node scripts/portable-web.mjs migrate`. Keep the normal web role in the file. Continue when the doctor reports `ready_for_google_setup`. It checks the database and bucket and prints `googleCallbackUrl`.
+The first command checks the Compose file without printing its secrets. Migration creates the tables. If the web account cannot create tables, set the migration role’s `DATABASE_URL` in your shell and use `docker compose -f compose.portable.yaml run --rm -e DATABASE_URL web node scripts/portable-web.mjs migrate`. Keep the normal web role in the file.
 
 ### If your provider uses an internal certificate authority
 
@@ -50,14 +51,19 @@ For PostgreSQL with this CA, set `sslmode=verify-full` in the database URL and `
 
 ## 2. Sign in and invite a teammate
 
-Register that exact callback as an authorized redirect URI for your Google web client. In `web.env`, enter its client ID and secret, then set `HARBOR_LOGIN_ALLOWED_EMAILS` to the two Google email addresses separated by a comma. If your Google app is in testing, include both accounts as test users.
+Choose the provider your teammates will use. You can enable both.
+
+- **Microsoft.** Follow the [Microsoft setup guide](microsoft-outlook.md#sign-in-with-microsoft) to register the Web callback, configure two users' directory object IDs and set the allowed addresses. For a Microsoft-only installation, leave both Google client values empty.
+- **Google.** Before entering the Google client settings, run `docker compose -f compose.portable.yaml run --rm web node scripts/portable-web.mjs doctor web --before-google` on a fresh install to get `googleCallbackUrl`, or use your exact HTTPS origin followed by `/auth/google/callback`. Register that redirect on the Google web client. Enter the Google client ID and secret in `web.env`. Add the test users in Google if the app is in testing.
+
+Set `HARBOR_LOGIN_ALLOWED_EMAILS` in `web.env` to the comma-separated addresses that should have private workspaces. Then check the configuration and start the app.
 
 ```sh
 docker compose -f compose.portable.yaml run --rm web node scripts/portable-web.mjs doctor web --check-workspace-access
 docker compose -f compose.portable.yaml up -d --wait web
 ```
 
-Expect `ready`, then open your **public HTTPS address** and choose **Continue with Google**. Only the web app starts.
+Expect `ready`, then open your **public HTTPS address** and choose **Continue with Microsoft** or **Continue with Google**, according to your configuration. Only the web app starts.
 
 1. As the owner, create a fictional Contact. Under **Workspaces**, enter the other account, choose **Viewer**, and select **Prepare invitation**. Copy the invitation link and share it yourself.
 2. Open the link in a separate browser profile as the teammate. Accept, open the shared workspace and find the Contact. Confirm a Viewer can read it but cannot edit it.

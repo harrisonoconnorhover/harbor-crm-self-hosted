@@ -4,7 +4,7 @@ import {cancelWorkspaceInvitation,changeWorkspaceInvitationRole,prepareWorkspace
 import {lockPortableLoginSession} from '../db/postgres/identity-store';
 import {sharedRecordWriteScope,workspaceInvitationId,workspaceRole} from '../lib/portable-workspace-access';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
-import {loginConfig} from '../lib/identity';
+import {portableLoginConfig as loginConfig} from './portable-login-config';
 import {portableApiIdentity} from './portable-api-identity';
 import {inviteSignInEnabled,requestSessionHash} from './portable-identity';
 import {portableDb} from './portable-db';
@@ -59,12 +59,12 @@ async function workspaceRoute(request:Request){
         const ownerId=admin?.ownerId??user.userId;
         if(change.action==='grant'||change.action==='invite'){
           const allowed=allowedEmails.includes(change.email);
-          if(change.email===user.email||change.email===admin?.ownerEmail)return json({error:'Enter your teammate’s Google email address.'},404);
+          if(change.email===user.email||change.email===admin?.ownerEmail)return json({error:'Enter your teammate’s email address.'},404);
           if(!allowed&&change.action==='invite'&&!inviteSignIn)
-            return json({error:'Ask your Harbor administrator to approve this Google account for sign-in, then prepare its invitation.'},404);
+            return json({error:'Ask your Harbor administrator to approve this account for sign-in, then prepare its invitation.'},404);
           if(!allowed&&change.action==='grant')
             return json({error:inviteSignIn?'Prepare an invitation so this teammate can sign in and accept access.':
-              'Ask your Harbor administrator to approve this Google account for sign-in first.'},404);
+              'Ask your Harbor administrator to approve this account for sign-in first.'},404);
           const result=change.action==='invite'?await prepareWorkspaceInvitation(tx,ownerId,change.email,change.role):
             await grantWorkspaceView(tx,ownerId,change.email);
           if(result==='no_workspace')return json({error:'Add your first record before sharing this workspace.'},409);

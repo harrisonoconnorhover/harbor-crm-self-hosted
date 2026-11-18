@@ -1,9 +1,11 @@
+import {outlookConfig} from './portable-outlook-provider';
 import {fileURLToPath} from 'node:url';
 import {enabledLeadForm} from '../db/postgres/lead-form-store';
 import {leadFormEmbedOrigin} from '../lib/lead-form-embedding';
 import {drizzle,type PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {portableMigrationHistory,readPortableMigrations} from './portable-migrations.mjs';
-import {googleLoginCallbackPath,googleLoginSetupIssues,identityRequestFailure,loginConfig} from '../lib/identity';
+import {googleLoginCallbackPath,googleLoginSetupIssues,loginConfig} from '../lib/identity';
+import {microsoftCallbackPath,microsoftLoginSettings,portableLoginConfig,portableLoginProviders,portableRequestFailure} from './portable-login-config';
 import {googleSigningKeysEndpoint,googleTokenEndpoint} from '../lib/google-identity';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {portableCalendarCancellationsEnabled,portableCalendarConfig,portableCalendarInvitesEnabled,
@@ -79,7 +81,7 @@ export function portableReleaseReady(){
 }
 
 async function checkDependencies(){
-  try{loginConfig(env);}
+  try{portableLoginConfig(env);}
   catch{
     observeReadiness('identity','needs_setup');
     return false;
@@ -97,7 +99,7 @@ async function checkDependencies(){
 }
 
 export function portableIdentitySetupFailure(request:Request){
-  const response=identityRequestFailure(request,env);
+  const response=portableRequestFailure(request);
   return response?.status===503?response:null;
 }
 
@@ -152,8 +154,8 @@ async function checkDatabase(mode:'local'|'hosted',profile:'web'|'worker',
                 ('public.portable_request_budgets','UPDATE', ARRAY['minute','used']),
                 ('public.portable_login_attempt_uses','SELECT', ARRAY['state_hash','expires_minute']),
                 ('public.portable_login_attempt_uses','INSERT', ARRAY['state_hash','expires_minute']),
-                ('public.login_identities','SELECT', ARRAY['id','google_subject','email','full_name']),
-                ('public.login_identities','INSERT', ARRAY['id','google_subject','email','full_name','created_at','updated_at']),
+                ('public.login_identities','SELECT', ARRAY['id','google_subject','microsoft_subject','email','full_name']),
+                ('public.login_identities','INSERT', ARRAY['id','google_subject','microsoft_subject','email','full_name','created_at','updated_at']),
                 ('public.login_identities','UPDATE', ARRAY['email','full_name','updated_at']),
                 ('public.login_sessions','SELECT', ARRAY['token_hash','user_id','expires_at']),
                 ('public.login_sessions','INSERT', ARRAY['token_hash','user_id','created_at','expires_at'])
@@ -365,7 +367,7 @@ export async function portableDoctor(profile:'web'|'worker',
   const web=profile==='web';
   let login:ReturnType<typeof loginConfig>|undefined;
   let webOrigin:string|undefined;
-  let googleCallbackUrl:string|undefined;
+  let googleCallbackUrl:string|undefined,microsoftCallbackUrl:string|undefined;
   let signInSettingsToCheck:string[]|undefined;
   if(web){
     try{
@@ -376,9 +378,19 @@ export async function portableDoctor(profile:'web'|'worker',
     }
     catch{checks.webOrigin='invalid_origin_or_port';}
     const {missing,invalidCredentials,invalidAllowlist}=googleLoginSetupIssues(env);
-    const awaitingGoogle=beforeGoogle&&!invalidAllowlist&&
+    const providers=portableLoginProviders(),hasMicrosoft=microsoftLoginSettings.some(key=>!!env[key]);
+    const hasGoogle=!!(env.HARBOR_LOGIN_GOOGLE_CLIENT_ID||env.HARBOR_LOGIN_GOOGLE_CLIENT_SECRET);
+    if(hasMicrosoft){
+      checks.microsoftSignIn=providers.microsoft?'ok':'invalid_sign_in_settings';
+      if(webOrigin)microsoftCallbackUrl=webOrigin+microsoftCallbackPath;
+    }
+    const awaitingGoogle=beforeGoogle&&!hasMicrosoft&&!invalidAllowlist&&
       missing.includes('HARBOR_LOGIN_GOOGLE_CLIENT_ID')&&missing.includes('HARBOR_LOGIN_GOOGLE_CLIENT_SECRET');
-    if(awaitingGoogle){
+    if(hasMicrosoft&&!hasGoogle){
+      checks.googleSignIn='disabled';
+      login=providers.microsoft;
+      googleCallbackUrl=undefined;
+    }else if(awaitingGoogle){
       checks.googleSignIn='pending_setup';
     }else{
       try{login=loginConfig(env);checks.googleSignIn='ok';}
@@ -390,6 +402,9 @@ export async function portableDoctor(profile:'web'|'worker',
       }
     }
   }
+  const outlookEnabled=web&&process.env.HARBOR_PORTABLE_OUTLOOK_ENABLED==='true';
+  const outlook=outlookEnabled?outlookConfig('outlook-mail'):undefined;
+  if(outlookEnabled)checks.personalOutlook=outlook?'ok':'invalid_outlook_settings';
   const personalGoogle=web?portablePersonalGoogleDeploymentReadiness():undefined;
   const personalGoogleCallbackUrls=personalGoogle&&webOrigin?{
     gmail:webOrigin+portablePersonalGoogleCallbackPath('gmail'),
@@ -446,7 +461,7 @@ export async function portableDoctor(profile:'web'|'worker',
     calendarInvites:web&&checkCalendar&&checks.calendarInvitations==='ok',
     calendarCancellations:checks.calendarCancellations==='ok',
     calendarReschedules:checks.calendarReschedules==='ok',
-    personalGoogle:personalGoogle?.gmail==='ok'||personalGoogle?.calendar==='ok',
+    personalGoogle:Boolean(outlook)||personalGoogle?.gmail==='ok'||personalGoogle?.calendar==='ok',
     workspaceAccess:web&&checkWorkspaceAccess,
   };
   const [database,storage,google,filePrivacy,gmailConnection,inboxConnection,calendarConnection]=await Promise.all([
@@ -469,6 +484,6 @@ export async function portableDoctor(profile:'web'|'worker',
   const result=!ready?'needs_setup':checks.googleSignIn==='pending_setup'?'ready_for_google_setup':'ready';
   return {profile,mode,result,
     ...(web?{}:{workerEnabled:mode==='local'||process.env.HARBOR_PORTABLE_WORKER_ENABLED==='true'}),
-    ...(googleCallbackUrl?{googleCallbackUrl}:{}),...(personalGoogleCallbackUrls?{personalGoogleCallbackUrls}:{}),
+    ...(googleCallbackUrl?{googleCallbackUrl}:{}),...(microsoftCallbackUrl?{microsoftCallbackUrl}:{}),...(personalGoogleCallbackUrls?{personalGoogleCallbackUrls}:{}),
     ...(signInSettingsToCheck?{signInSettingsToCheck}:{}),checks};
 }

@@ -5,12 +5,12 @@ import {useState,type FormEvent} from 'react';
 import {EmailSuppressionSettings} from '../app/email-suppression';
 import {EmailNeverLog} from '../app/email-never-log';
 import {PortableEmailTemplates} from './portable-email-template-ui';
-import {PortableGooglePanel,type PersonalGoogleStatus} from './portable-google-panel';
+import {PortableConnectionPanel,type PersonalConnectionStatus} from './portable-personal-connection-panel';
 import './portable-contacts.css';
 import {PortableCrmHeader} from './portable-crm-header';
 import './portable-settings.css';
 
-export function PortableEmailSettings({email,inboxAvailable,personal,googleOutcome}:{email:string;inboxAvailable:boolean;personal?:PersonalGoogleStatus;googleOutcome?:string}){
+export function PortableEmailSettings({email,inboxAvailable,personal,outlook,outlookOutcome,googleOutcome}:{email:string;inboxAvailable:boolean;personal?:PersonalConnectionStatus;outlook?:PersonalConnectionStatus;outlookOutcome?:string;googleOutcome?:string}){
   const showConnection=personal!==undefined||inboxAvailable;
   const [url,setUrl]=useState('');
   const [busy,setBusy]=useState(false);
@@ -56,6 +56,7 @@ export function PortableEmailSettings({email,inboxAvailable,personal,googleOutco
         <h1 id="portable-email-heading">Email settings</h1>
         <nav aria-label="Email settings sections">
           {showConnection&&<a href="#email-connection">Gmail connection</a>}
+          {outlook!==undefined&&<a href="#outlook-connection">Outlook connection</a>}
           <a href="#email-templates">Templates</a>
           <a href="#email-suppressions">Do not email</a>
           <a href="#email-never-log">Never log</a>
@@ -63,7 +64,7 @@ export function PortableEmailSettings({email,inboxAvailable,personal,googleOutco
         </nav>
       </header>
       {showConnection&&<div id="email-connection">
-        {personal!==undefined&&<PortableGooglePanel provider="gmail" status={personal} outcome={googleOutcome}/>}
+        {personal!==undefined&&<PortableConnectionPanel provider="gmail" status={personal} outcome={googleOutcome}/>}
         {inboxAvailable&&<section className="portable-provider-card" aria-label="Gmail inbox">
           <header className="portable-provider-heading">
             <span className="portable-provider-icon"><Inbox size={20} aria-hidden="true"/></span>
@@ -79,6 +80,7 @@ export function PortableEmailSettings({email,inboxAvailable,personal,googleOutco
           {inboxResult&&<p role={inboxResult.ok?'status':'alert'}>{inboxResult.text}</p>}
         </section>}
       </div>}
+      {outlook!==undefined&&<div id="outlook-connection"><PortableConnectionPanel provider="outlook-mail" status={outlook} outcome={outlookOutcome}/></div>}
       <div id="email-templates"><PortableEmailTemplates/></div>
       <div id="email-suppressions"><EmailSuppressionSettings portable/></div>
       <div id="email-never-log"><EmailNeverLog portable/></div>

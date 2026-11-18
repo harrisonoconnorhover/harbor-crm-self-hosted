@@ -142,7 +142,7 @@ try{
   if(!interrupted){
     const target=await fixture(root,'harbor_restore_test',certificate,binaries);
     if(!interrupted){
-      child=spawn(process.execPath,['--test','tests/portable-web.test.mjs'],{cwd,stdio:'inherit',detached:true,env:{
+      child=spawn(process.execPath,['--test','tests/portable-web.test.mjs','tests/portable-microsoft-identity.test.mjs'],{cwd,stdio:'inherit',detached:true,env:{
         ...env,TMPDIR:root,HARBOR_TEST_MONITOR_ROLE:'true',NODE_EXTRA_CA_CERTS:certificate.cert,PGSSLROOTCERT:certificate.cert,
         HARBOR_TEST_TLS_KEY:certificate.key,
         HARBOR_TEST_POSTGRES_URL:source.db,HARBOR_TEST_S3_ENDPOINT:source.s3,

@@ -884,6 +884,14 @@ export async function verifyPortableRecovery({env,mock,request,headers,record,ot
         HARBOR_S3_ENDPOINT:proxy.href,DATABASE_URL:restoreDatabase.href};
     }
     const refuseRestore=(bundle,message)=>assertRefused(restoreEnv,bundle,message,restoreArgs);
+    const microsoftId=randomUUID(),microsoftSubject=randomUUID()+':'+randomUUID();
+    const microsoftEmail='outlook-recovery@example.test';
+    await sql.begin(async tx=>{
+      await tx`INSERT INTO login_identities (id,microsoft_subject,email,created_at,updated_at)
+        VALUES (${microsoftId},${microsoftSubject},${microsoftEmail},0,0)`;
+      await tx`INSERT INTO portable_google_grants (user_id,provider,id,email,refresh_token)
+        VALUES (${microsoftId},'outlook-calendar',${randomUUID()},${microsoftEmail},'fictional encrypted test credential')`;
+    });
 
     const [{owner_id:actorId}]=await sql`SELECT owner_id FROM private_workspaces WHERE id=${sharing.workspaceId}`;
     const pilot=await seedPortablePilot({request,origin:env.HARBOR_LOGIN_ORIGIN,headers,actorId});
@@ -2012,7 +2020,10 @@ process.exit(result.status??1);
     assert.ok(restoredQueue.includes(heldSearch));
     assert.ok(!restoredQueue.includes(sharing.gmail.crashId));
     assert.match(restoredQueue,/Restored external action/);
-    assert.equal((await sql`SELECT id FROM portable_google_grants`).length,4);
+    assert.equal((await sql`SELECT id FROM portable_google_grants WHERE provider IN ('gmail','calendar')`).length,4);
+    assert.equal((await sql`SELECT id FROM portable_google_grants WHERE provider='outlook-calendar' AND user_id=${microsoftId}`).length,1);
+    const [restoredMicrosoft]=await targetSql`SELECT google_subject,microsoft_subject,email FROM login_identities WHERE id=${microsoftId}`;
+    assert.deepEqual({...restoredMicrosoft},{google_subject:null,microsoft_subject:microsoftSubject,email:microsoftEmail});
     assert.equal((await targetSql`SELECT id FROM portable_google_grants`).length,0);
     assert.equal((await targetSql`SELECT state_hash FROM portable_google_attempts`).length,0);
     assert.equal((await targetSql`SELECT id FROM portable_published_availability`).length,0);

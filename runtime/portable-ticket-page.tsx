@@ -8,7 +8,7 @@ import {portableDb} from './portable-db';
 import {portableWorkspaceGuest} from './portable-identity';
 import {guestWorkspaceAllowed} from '../db/postgres/workspace-sign-in-store';
 import {sharedWorkspaceGrant} from '../db/postgres/workspace-viewer-store';
-import {loginConfig} from '../lib/identity';
+import {portableLoginConfig as loginConfig} from './portable-login-config';
 import {env} from './portable-env';
 import {PortableTickets} from './portable-tickets-ui';
 

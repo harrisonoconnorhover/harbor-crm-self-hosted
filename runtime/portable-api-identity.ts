@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {guestWorkspaceAllowed} from '../db/postgres/workspace-sign-in-store';
-import {identityRequestFailure,loginConfig} from '../lib/identity';
+import {portableLoginConfig as loginConfig,portableRequestFailure} from './portable-login-config';
 import {env} from './portable-env';
 import {portableWorkspaceGuest,requestIdentity} from './portable-identity';
 import {portableDb} from './portable-db';
@@ -9,7 +9,7 @@ import {portableRateLimit} from './portable-rate-limit';
 const guestWorkspacePaths=new Set(['/api/custom-properties','/api/crm','/api/background-jobs','/api/record-attachments','/api/logged-activities','/api/pipeline','/api/associations','/api/crm/views','/api/crm/search','/api/reporting','/api/task-reminders','/api/recycle-bin','/api/record-merge','/api/duplicates','/api/leads','/api/tickets']);
 
 export async function portableApiIdentity(request:Request,scope?:'api_read'|'api_write'){
-  const failure=identityRequestFailure(request,env);
+  const failure=portableRequestFailure(request);
   if(failure)return failure;
   const user=await requestIdentity(request.headers);
   if(!user)return Response.json({error:'Sign in to access your CRM.'},{

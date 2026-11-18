@@ -11,7 +11,7 @@ import {portableGmailAccessToken,portableGmailConfig} from './portable-gmail-con
 import {portableWorkspaceGuest} from './portable-identity';
 import {portableRateLimit} from './portable-rate-limit';
 import {issueGuestStatusReceipt} from '../lib/calendar/guest-booking-status';
-import {loginConfig} from '../lib/identity';
+import {portableLoginConfig as loginConfig} from './portable-login-config';
 import {env} from './portable-env';
 import {ApiError} from '../lib/api-error';
 

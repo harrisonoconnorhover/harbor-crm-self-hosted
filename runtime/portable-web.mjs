@@ -29,9 +29,9 @@ api.add('/api/api-tokens');
 api.add('/api/file-folders');
 api.add('/api/email/never-log');
 const postApi=new Set(['/api/email/unsubscribe','/api/email/inbox','/api/calendar/availability','/api/calendar/meetings',
-  '/api/calendar/guest-invitations','/api/crm/import']);
-const googleConnections='/api/google/connections';
-const googleCallbacks=new Set(['/api/google/gmail/callback','/api/google/calendar/callback']);
+  '/api/calendar/guest-invitations','/api/crm/import','/api/outlook-records','/api/outlook/availability']);
+const personalConnections=new Set(['/api/google/connections','/api/outlook/connections']);
+const connectionCallbacks=new Set(['/api/google/gmail/callback','/api/google/calendar/callback','/api/outlook/mail/callback','/api/outlook/calendar/callback']);
 const emailTemplates='/api/email/templates';
 const formSubmissionPath=/^\/api\/public\/forms\/[0-9a-f-]{36}$/i;
 const guestBookingStatus='/api/public/booking-status';
@@ -42,7 +42,7 @@ const inquiryWebhookPath=/^\/api\/v1\/forms\/[0-9a-f-]{36}\/inquiries$/i;
 const setupPages=new Set(['/auth/sign-in','/privacy','/terms']);
 const staticPages=new Set([...setupPages,'/favicon.svg','/harbor.webmanifest','/harbor-icon-180.png','/harbor-icon-192.png','/harbor-icon-512.png','/harbor-starter-contacts.csv','/harbor-starter-contacts-and-companies.csv']);
 const pages=new Set([...staticPages,'/','/tickets','/products','/quotes','/auth/sign-out','/email/unsubscribe']);
-const googleLogin=new Set(['/auth/google/start','/auth/google/callback']);
+const loginRoutes=new Set(['/auth/google/start','/auth/google/callback','/auth/microsoft/start','/auth/microsoft/callback']);
 const reply=(text,status)=>new Response(text,{status,headers:{'cache-control':'no-store'}});
 const fingerprint=readFileSync(new URL('../.harbor/portable-build/release.sha256',import.meta.url),'utf8').trim();
 if(!/^[a-f0-9]{64}$/.test(fingerprint))throw Error('The portable build fingerprint is invalid. Rebuild the release.');
@@ -55,7 +55,7 @@ export function portableApiFailureRoute(pathname){
   if(externalRecordPath.test(pathname)||externalBatchPath.test(pathname))return 'records-api';
   if(formSubmissionPath.test(pathname)||inquiryWebhookPath.test(pathname))return 'form-submission';
   if(isGuestBooking(pathname))return 'guest-booking';
-  if(api.has(pathname)||postApi.has(pathname)||pathname===googleConnections||googleCallbacks.has(pathname)||pathname===emailTemplates)
+  if(api.has(pathname)||postApi.has(pathname)||personalConnections.has(pathname)||connectionCallbacks.has(pathname)||pathname===emailTemplates)
     return pathname;
   return 'other-api';
 }
@@ -74,20 +74,20 @@ export default async function portableWeb(request,context){
   const {origin,pathname}=new URL(request.url);
   if(pathname==='/healthz'&&['GET','HEAD'].includes(request.method))return portableHealth(request.method,fingerprint);
   if(origin!==process.env.HARBOR_LOGIN_ORIGIN)return reply('Harbor origin does not match this deployment.',421);
-  const googleRoute=googleLogin.has(pathname);
-  if(googleRoute&&request.method!=='GET')return new Response(null,{status:405,headers:{allow:'GET','cache-control':'no-store'}});
+  const loginRoute=loginRoutes.has(pathname);
+  if(loginRoute&&request.method!=='GET')return new Response(null,{status:405,headers:{allow:'GET','cache-control':'no-store'}});
   const formPage=/^\/forms\/([0-9a-f-]{36})$/i.exec(pathname);
   const availabilityPage=/^\/availability\/[0-9a-f-]{36}$/i.test(pathname);
   const statusPage=pathname==='/booking-status';
   const reading=request.method==='GET'||request.method==='HEAD';
-  const supported=(pathname===googleConnections&&['GET','POST','DELETE'].includes(request.method))||
-    (googleCallbacks.has(pathname)&&request.method==='GET')||
+  const supported=(personalConnections.has(pathname)&&['GET','POST','DELETE'].includes(request.method))||
+    (connectionCallbacks.has(pathname)&&request.method==='GET')||
     (request.method==='POST'&&(pathname==='/auth/logout'||postApi.has(pathname)||api.has(pathname)||
       formSubmissionPath.test(pathname)||isGuestBooking(pathname)||externalBatchPath.test(pathname)||inquiryWebhookPath.test(pathname)))||
-    (request.method==='PUT'&&pathname==='/api/email/inbox')||
+    (request.method==='PUT'&&(pathname==='/api/email/inbox'||pathname==='/api/outlook-records'))||
     (request.method==='DELETE'&&(pathname==='/api/email/suppressions'||pathname==='/api/email/never-log'))||
     (pathname===emailTemplates&&(reading||request.method==='PUT'||request.method==='DELETE'))||
-    (reading&&(googleRoute||pages.has(pathname)||api.has(pathname)||formPage||availabilityPage||statusPage||externalRecordPath.test(pathname)));
+    (reading&&(loginRoute||pages.has(pathname)||api.has(pathname)||formPage||availabilityPage||statusPage||externalRecordPath.test(pathname)));
   if(!supported)return reply('Not found',404);
   const setup=portableIdentitySetupFailure(request);
   if(setup&&pathname==='/'&&reading){

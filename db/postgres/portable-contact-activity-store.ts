@@ -283,11 +283,11 @@ export function mutatePortableActivity(db:Db,actor:{userId:string;displayName:st
       if(existing.occurredAt===input.occurredAt&&existing.summary===input.summary)return 'unchanged';
     }
 
-    // Before the first change the activity is its own creation receipt. Keep a
-    // hash for future retries so removing the row does not retain its content.
+    // Manual logs need a receipt before their first change. A provider log
+    // may already have a source-specific receipt that must survive edits and removal.
     if(existing.revision===1){
       await tx.insert(receipts).values({workspaceId,namespace:namespace(home),id:existing.id,
-        fingerprint:await creationFingerprint(existing.actorId,home,existing)});
+        fingerprint:await creationFingerprint(existing.actorId,home,existing)}).onConflictDoNothing();
     }
     if(input.action==='remove'){
       if(shared)await tx.insert(removals).values({workspaceId,recordKind:home.kind,recordId:home.recordId,id:input.id,

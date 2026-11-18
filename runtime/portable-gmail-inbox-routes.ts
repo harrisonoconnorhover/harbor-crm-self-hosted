@@ -1,3 +1,4 @@
+import {personalConnectionActor} from './portable-connection-session';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {z} from 'zod';
 import {readContacts} from '../db/postgres/contact-store';
@@ -6,7 +7,8 @@ import {portableNeverLogExclusion} from '../db/postgres/portable-never-log-store
 import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {GMAIL_READ_SCOPE,GmailError,gmailMessage,gmailMessageMetadata,gmailReceivedHeaders,gmailReceivedIndex,gmailReceivedPreviewHeaders,mailboxEmail,refreshTokens} from '../lib/email/gmail';
 import {sha256} from '../lib/email/crypto';
-import {cookieName,loginConfig,readCookie} from '../lib/identity';
+import {cookieName,readCookie} from '../lib/identity';
+import {portableLoginConfig as loginConfig} from './portable-login-config';
 import {gmailInboxURL} from '../lib/email/inbox';
 import {emailAddress} from '../lib/email/message';
 import {portableGmailSummaryLimit as textLimit} from '../lib/portable-contact-activities';
@@ -17,8 +19,8 @@ import {portableDb} from './portable-db';
 import {env} from './portable-env';
 import {requestIdentity} from './portable-identity';
 import {portableGmailAccessToken} from './portable-gmail-config';
-import {readGoogleGrant} from '../db/postgres/portable-google-store';
-import {boundedGmailRead,personalGoogleAccess,personalGoogleActor} from './portable-google-connections';
+import {readConnectionGrant} from '../db/postgres/portable-connection-store';
+import {boundedGmailRead,personalGoogleAccess} from './portable-google-connections';
 import {portablePersonalGoogleConfig} from './portable-google-config';
 import {ApiError} from '../lib/api-error';
 import {portableGmailInboxConfig} from './portable-gmail-inbox-config';
@@ -99,8 +101,8 @@ async function route(request:Request){
     if(!config&&!personalConfig)return configuredInbox?
       json({error:'Only the configured private mailbox owner can search received email.'},403):json({error:'Inbox lookup is unavailable.'},404);
     if(user.guest)return json({error:'Open your own mailbox to search received email.'},403);
-    const actor=personalConfig?await personalGoogleActor(request,user):null;
-    const grant=actor?await readGoogleGrant(portableDb(),actor,'gmail'):null;
+    const actor=personalConfig?await personalConnectionActor(request,user):null;
+    const grant=actor?await readConnectionGrant(portableDb(),actor,'gmail'):null;
     if(personalConfig&&(!grant||grant.needsReconnect))return mailboxAuthorization(grant?.needsReconnect
       ?'Reconnect your Gmail account in Email settings.':'Connect your Gmail account in Email settings.');
     let personalConnection:Awaited<ReturnType<typeof personalGoogleAccess>>|undefined;

@@ -1,7 +1,7 @@
 import {sql} from 'drizzle-orm';
 import {guestBookingStatus,guestBookingStatusRoute,guestStatusRetention,type GuestStatusLocator} from '../lib/calendar/guest-booking-status';
 import {guestInvitationId} from '../lib/calendar/guest-invitation';
-import {loginConfig} from '../lib/identity';
+import {portableLoginConfig as loginConfig} from './portable-login-config';
 import {portableDb} from './portable-db';
 import {env} from './portable-env';
 import {portableRateLimit} from './portable-rate-limit';

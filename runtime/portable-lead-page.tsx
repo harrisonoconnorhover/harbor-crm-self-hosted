@@ -8,7 +8,7 @@ import {guestWorkspaceAllowed} from '../db/postgres/workspace-sign-in-store';
 import {sharedWorkspaceGrant} from '../db/postgres/workspace-viewer-store';
 import {portableLeadRead} from '../lib/portable-leads';
 import {portableDb} from './portable-db';
-import {loginConfig} from '../lib/identity';
+import {portableLoginConfig as loginConfig} from './portable-login-config';
 import {env} from './portable-env';
 import {portableWorkspaceGuest} from './portable-identity';
 import {PortableLeads} from './portable-leads-ui';

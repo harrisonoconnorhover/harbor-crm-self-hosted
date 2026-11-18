@@ -534,7 +534,7 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
     await sql`GRANT INSERT (token_hash,user_id,created_at,expires_at) ON public.login_sessions TO ${sql(role)}`;
     await sql`GRANT SELECT (token_hash,user_id,expires_at), UPDATE (created_at), DELETE
       ON public.login_sessions TO ${sql(role)}`;
-    await sql`GRANT SELECT (google_subject), INSERT (id,google_subject,email,full_name,created_at,updated_at),
+    await sql`GRANT SELECT (google_subject,microsoft_subject), INSERT (id,google_subject,microsoft_subject,email,full_name,created_at,updated_at),
       UPDATE (email,full_name,updated_at) ON public.login_identities TO ${sql(role)}`;
     await sql`GRANT SELECT (scope,subject,minute,used), INSERT (scope,subject,minute,used),
       UPDATE (minute,used) ON public.portable_request_budgets TO ${sql(role)}`;
@@ -547,6 +547,7 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
       'INSERT (state_hash) ON public.portable_login_attempt_uses',
       'UPDATE (expires_minute) ON public.portable_login_attempt_uses',
       'SELECT (google_subject) ON public.login_identities',
+      'SELECT (microsoft_subject) ON public.login_identities',
       'UPDATE (created_at) ON public.login_sessions',
       'DELETE ON public.login_sessions',
     ];

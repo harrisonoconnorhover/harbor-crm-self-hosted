@@ -1,5 +1,6 @@
+import {personalConnectionActor} from './portable-connection-session';
 import {z} from 'zod';
-import {disconnectGoogleGrant,readGoogleGrantStatus} from '../db/postgres/portable-google-store';
+import {disconnectConnectionGrant,readConnectionGrantStatus} from '../db/postgres/portable-connection-store';
 import type {PortableGoogleProvider} from '../db/postgres/portable-google-schema';
 import {ApiError} from '../lib/api-error';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
@@ -9,7 +10,7 @@ import {GoogleConnectionError} from '../lib/google-oauth-result';
 import {portableApiIdentity} from './portable-api-identity';
 import {portableDb} from './portable-db';
 import {portablePersonalGoogleConfig} from './portable-google-config';
-import {boundedGoogleRead,completePersonalGoogle,personalGoogleAccess,personalGoogleActor,startPersonalGoogle} from './portable-google-connections';
+import {boundedGoogleRead,completePersonalGoogle,personalGoogleAccess,startPersonalGoogle} from './portable-google-connections';
 
 const query=z.object({provider:z.enum(['gmail','calendar']),action:z.literal('check').optional()}).strict();
 const stateShape=z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -33,10 +34,10 @@ async function route(request:Request){
     const {provider,action}=parsed.data;
     const config=portablePersonalGoogleConfig(provider);
     if(!config)return json({error:'Personal Google connections are not configured.'},404);
-    const actor=await personalGoogleActor(request,user);
+    const actor=await personalConnectionActor(request,user);
     if(request.method==='GET'){
       if(action)return json({error:'Use the Google connection controls.'},400);
-      return json({connection:await readGoogleGrantStatus(portableDb(),actor,provider)});
+      return json({connection:await readConnectionGrantStatus(portableDb(),actor,provider)});
     }
     if(request.method==='DELETE'){
       if(action)return json({error:'Use the Google connection controls.'},400);
@@ -44,7 +45,7 @@ async function route(request:Request){
       try{input=JSON.parse(await readBoundedRequestText(request,2048)??'');}catch{}
       const values=idShape.safeParse(input);
       if(!values.success)return json({error:'Choose a connection to disconnect.'},400);
-      if(!await disconnectGoogleGrant(portableDb(),actor,provider,values.data.id))
+      if(!await disconnectConnectionGrant(portableDb(),actor,provider,values.data.id))
         return json({error:'This connection changed. Refresh and try again.'},409);
       return json({disconnected:true});
     }
@@ -83,7 +84,7 @@ async function callback(request:Request,provider:PortableGoogleProvider){
     const denied=params.getAll('error').length===1&&!params.has('code');
     if(!state.success||params.getAll('state').length!==1||
       !(denied||code.success&&params.getAll('code').length===1&&!params.has('error')))return back('expired');
-    const actor=await personalGoogleActor(request,user);
+    const actor=await personalConnectionActor(request,user);
     await completePersonalGoogle(request,actor,provider,config,state.data,code.success?code.data:null);
     return back('connected');
   }catch(error){

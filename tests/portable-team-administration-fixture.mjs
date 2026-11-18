@@ -1,4 +1,25 @@
 import assert from 'node:assert/strict';
+import {DomUtils,parseDocument} from 'htmlparser2';
+
+function verifyRoleGuide(html,role){
+  const guide=DomUtils.findOne(el=>el.name==='details'&&el.attribs.class==='portable-role-guide',parseDocument(html).children);
+  assert.ok(guide,'The workspace and the invitation should both offer the role comparison.');
+  const preset=DomUtils.findOne(el=>el.name==='input'&&el.attribs.type==='radio'&&'checked' in el.attribs,guide.children);
+  assert.equal(preset.attribs.value,role,'The compact comparison starts at the role under review.');
+  const rows=DomUtils.getElementsByTagName('tr',guide.children);
+  const permissions=label=>{
+    const row=rows.find(row=>DomUtils.getElementsByTagName('th',row.children).some(th=>DomUtils.textContent(th).startsWith(label)));
+    assert.ok(row,'Missing capability: '+label);
+    return Object.fromEntries(DomUtils.getElementsByTagName('td',row.children).map(td=>[td.attribs['data-column'],DomUtils.textContent(td)]));
+  };
+  assert.deepEqual(permissions('Appoint or change a backup administrator'),{owner:'Yes',backup:'No',editor:'No',viewer:'No'});
+  assert.equal(permissions('Change extra permissions').backup,'Only permissions held');
+  assert.equal(permissions('Grant Viewer access without an invitation').backup,'No');
+  assert.equal(permissions('Merge duplicate contacts or companies').editor,'With required extras');
+  assert.equal(permissions('Contact files').viewer,'Download');
+  assert.equal(permissions('Scheduled notes').editor,'View and schedule');
+  assert.match(DomUtils.textContent(guide),/off for new teammates/);
+}
 
 // Use the second account's workspace so the main sharing fixture's memberships stay intact.
 export async function verifyPortableBackupTeamAdministration({request,origin,headers,other,signIn,sql}){
@@ -30,6 +51,10 @@ export async function verifyPortableBackupTeamAdministration({request,origin,hea
     member=await ownedMember(appoint(member.id,true),backupEmail);
     assert.equal(member.backupAdmin,true);
     const link=scoped(member.id),manage=body=>change(backup,body,link);
+    const contactsPage=await (await get(owner,'/?kind=contacts')).text();
+    assert.match(contactsPage,/href="[^"]*view=workspaces#workspace-role-guide-viewer"/);
+    assert.doesNotMatch(contactsPage,/<table class="portable-role-matrix"/,'Ordinary CRM lists link to the full role comparison in Workspaces.');
+    verifyRoleGuide(await (await get(owner,'/?view=workspaces')).text(),'owner');
     const first=await read(await get(backup,link));
     assert.equal(first.managed.ownerEmail,'other@example.test');
     assert.equal(first.managed.permissions.contactFiles,false);
@@ -47,18 +72,21 @@ export async function verifyPortableBackupTeamAdministration({request,origin,hea
     const invited=await read(await manage({action:'invite',email:repEmail,role:'editor'}));
     const invitation=invited.sent.find(i=>i.email===repEmail);
     const review=(await (await get(rep,'/?invitation='+invitation.id)).text()).replaceAll('<!-- -->','');
+    verifyRoleGuide(review,'editor');
     assert.match(review,/What an Editor can do/);
     assert.match(review,/Create, assign and complete shared tasks/);
-    assert.match(review,/Gmail and Calendar stay private/);
+    assert.match(review,/mail and calendar connections stay private/);
     const revised=await read(await manage({action:'invite_role',id:invitation.id,role:'viewer'}));
     const replacement=revised.sent.find(i=>i.email===repEmail);
     assert.notEqual(replacement.id,invitation.id);
     const nextPreview=(await (await get(rep,'/?invitation='+replacement.id)).text()).replaceAll('<!-- -->','');
+    verifyRoleGuide(nextPreview,'viewer');
     assert.match(nextPreview,/What a Viewer can do/);
     assert.match(nextPreview,/Read shared tasks and their due dates/);
     await read(await change(rep,{action:'accept_invite',id:replacement.id}));
     let sales=locate(await read(await get(backup,link)),repEmail);
     assert.equal(sales.backupAdmin,false);
+    for(const permission of ['contactFiles','scheduledNotes','contactOutreach','recordActivities'])assert.equal(sales[permission],false);
     assert.equal((await manage({action:'backup_admin',id:sales.id,enabled:true})).status,403);
     assert.equal((await manage({action:'contact_files',id:sales.id,enabled:true})).status,404);
     sales=await ownedMember(update(sales.id,'contact_files',{enabled:true}),repEmail);

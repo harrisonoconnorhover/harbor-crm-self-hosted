@@ -24,6 +24,7 @@ import {PortableTaskHistory} from './portable-task-history-ui';
 import {PortableMeetingInvite} from './portable-meeting-ui';
 import {PortableContactJobs} from './portable-contact-jobs-ui';
 import {PortableGmailInbox} from './portable-gmail-inbox-ui';
+import {PortableOutlookRecords} from './portable-outlook-records-ui';
 import {PortableContactFiles} from './portable-contact-files-ui';
 import {PortableRecordPicker} from './portable-record-picker';
 import {PortableRecordExport} from './portable-record-export-ui';
@@ -51,7 +52,7 @@ type ListLink={after?:string;keepFilters?:boolean;view?:'list'|'board'|'summary'
 type Field=Exclude<keyof ContactFields|keyof CompanyFields|keyof DealFields,'custom'|'recordOwner'>;
 type Props={kind:PortableRecordKind;email:string;records:Row[];search?:string;owner?:PortableRecordQuery['owner'];sort?:PortableRecordQuery['sort'];next:string|null;paged:boolean;filesEnabled:boolean;
   savedViews?:PortableSavedView[];activeViewId?:string;activeViewName?:string;activeViewColumns?:string[];lastContactedById?:Record<string,string|null>;customProperties:PortableCustomProperty[];assignees:{id:string;label:string}[];workspaceSharing?:WorkspaceSharing;
-  initialRecord?:Row;startNewDeal?:boolean;related?:RelatedRecord;gmailSender?:string;gmailInboxEnabled?:boolean;calendarAvailable:boolean;calendarInvites:boolean;pipelines:DealPipeline[];board?:DealBoardData;summary?:DealSummaryData;closeMonth?:string;pipelineId?:string;stage?:string;workspaceId?:string;grant?:{id:string;role:WorkspaceRole;contactFiles:boolean;scheduledNotes:boolean;contactOutreach:boolean;recordActivities:boolean}};
+  initialRecord?:Row;startNewDeal?:boolean;related?:RelatedRecord;gmailSender?:string;gmailInboxEnabled?:boolean;outlookMailEnabled?:boolean;outlookCalendarEnabled?:boolean;calendarAvailable:boolean;calendarInvites:boolean;pipelines:DealPipeline[];board?:DealBoardData;summary?:DealSummaryData;closeMonth?:string;pipelineId?:string;stage?:string;workspaceId?:string;grant?:{id:string;role:WorkspaceRole;contactFiles:boolean;scheduledNotes:boolean;contactOutreach:boolean;recordActivities:boolean}};
 const titles={contacts:'Contacts',companies:'Companies',deals:'Deals'} satisfies Record<PortableRecordKind,string>;
 const searchByKind={contacts:'Name or email',companies:'Name or domain',deals:'Deal name'};
 const fieldsByKind={
@@ -67,7 +68,7 @@ const link=(id:string|null|undefined,name:string|null|undefined,fallback:string)
 const listColumnText=(value:unknown)=>typeof value==='boolean'?(value?'Yes':'No'):
   typeof value==='string'||typeof value==='number'?String(value)||'—':'—';
 
-export function PortableRecords({kind,email,records,search,owner,sort,next,paged,filesEnabled,initialRecord,startNewDeal,related,gmailSender,gmailInboxEnabled,calendarAvailable,calendarInvites,pipelines,board,summary,closeMonth,pipelineId,stage,workspaceId,grant,savedViews,activeViewId,activeViewName,activeViewColumns,lastContactedById,customProperties,assignees,workspaceSharing}:Props){
+export function PortableRecords({kind,email,records,search,owner,sort,next,paged,filesEnabled,initialRecord,startNewDeal,related,gmailSender,gmailInboxEnabled,outlookMailEnabled=false,outlookCalendarEnabled=false,calendarAvailable,calendarInvites,pipelines,board,summary,closeMonth,pipelineId,stage,workspaceId,grant,savedViews,activeViewId,activeViewName,activeViewColumns,lastContactedById,customProperties,assignees,workspaceSharing}:Props){
   const router=useRouter();
   const [editing,setEditing]=useState<Row|'new'|null>(initialRecord??(startNewDeal?'new':null));
   const [fullRecordEdit,setFullRecordEdit]=useState(false);
@@ -487,6 +488,10 @@ export function PortableRecords({kind,email,records,search,owner,sort,next,paged
           setOutreachRefresh(value=>value+1);
           if(lastContactedById||sort)router.refresh();
         }}/>}
+      {!shared&&contact?.data.email&&(outlookMailEnabled||outlookCalendarEnabled)&&<PortableOutlookRecords
+        key={'outlook:'+contact.id+':'+contact.data.email+':'+outlookMailEnabled+':'+outlookCalendarEnabled}
+        recordId={contact.id} contactEmail={contact.data.email} mail={outlookMailEnabled} calendar={outlookCalendarEnabled}
+        onLogged={()=>{setOutreachRefresh(value=>value+1);if(lastContactedById||sort)router.refresh();}}/>}
       {calendarInvites&&!shared&&contact?.data.email&&<PortableMeetingInvite key={'meeting:'+contact.id}
         contactId={contact.id} recipient={contact.data.email}/>}
       {showNotes&&current&&<PortableContactJobs key={'scheduled-notes:'+current.id} recordId={current.id} workspaceId={workspaceId}

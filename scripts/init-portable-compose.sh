@@ -23,7 +23,8 @@ HARBOR_S3_SECRET_ACCESS_KEY=
 # HARBOR_S3_REGION=us-east-1
 # HARBOR_S3_ADDRESSING=path-style
 
-# Fill these in after the preflight gives you the callback URL.
+# For Microsoft sign-in or personal Outlook connections see docs/microsoft-outlook.md.
+# For Google sign-in fill in the client after the preflight gives you the callback URL.
 HARBOR_LOGIN_GOOGLE_CLIENT_ID=
 HARBOR_LOGIN_GOOGLE_CLIENT_SECRET=
 HARBOR_LOGIN_ALLOWED_EMAILS=

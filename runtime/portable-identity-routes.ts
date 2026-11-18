@@ -1,15 +1,18 @@
-import {createGoogleIdentityRoutes} from '../lib/identity-routes';
-import {env} from './portable-env';
-import {beginLogin,finishLogin,revokeLogin} from './portable-identity';
+import {createOidcIdentityRoutes} from '../lib/identity-routes';
+import {beginLogin,finishLogin,microsoft,revokeLogin} from './portable-identity';
+import {portableLoginConfig,portableLoginProviders} from './portable-login-config';
 import {portableRateLimit} from './portable-rate-limit';
 
-const routes=createGoogleIdentityRoutes(env,{beginLogin,finishLogin,revokeLogin},stage=>{
+function logFailure(stage:string){
   const reference=crypto.randomUUID();
   console.warn(JSON.stringify({event:'harbor_portable_sign_in_failed',reference,stage}));
   return reference;
-});
-
-export async function startGoogleLogin(request:Request){
-  return await portableRateLimit('login_start','')??routes.startGoogleLogin(request);
 }
-export const {completeGoogleLogin,logout}=routes;
+const admitStart=()=>portableRateLimit('login_start','');
+const googleRoutes=createOidcIdentityRoutes(()=>!!portableLoginProviders().google,portableLoginConfig,
+  {beginLogin,finishLogin,revokeLogin},logFailure,admitStart);
+const microsoftRoutes=createOidcIdentityRoutes(()=>!!portableLoginProviders().microsoft,portableLoginConfig,
+  {...microsoft,revokeLogin},logFailure,admitStart);
+export const {startLogin:startGoogleLogin,completeLogin:completeGoogleLogin}=googleRoutes;
+export const {startLogin:startMicrosoftLogin,completeLogin:completeMicrosoftLogin}=microsoftRoutes;
+export const logout=(request:Request)=>(portableLoginProviders().google?googleRoutes:microsoftRoutes).logout(request);

@@ -4,20 +4,29 @@ import {CalendarDays,Mail} from 'lucide-react';
 import {useState} from 'react';
 import {useRouter} from 'next/navigation';
 
-export type PersonalGoogleStatus={id:string;email:string;needsReconnect:boolean}|null|'unavailable';
+export type PersonalConnectionStatus={id:string;email:string;needsReconnect:boolean}|null|'unavailable';
 
-const notices:Record<string,string>={
-  connected:'Google connection saved.',
-  expired:'That connection attempt expired or was already used. Start again from this browser.',
-  permissions:'Google did not grant the requested read access. Try connecting again.',
-  denied:'Google access was not granted.',
-  wrong_account:'Choose the same Google account you used to sign in to Harbor.',
-  setup:'This connection needs setup by your Harbor administrator.',
-  provider_unavailable:'Google took too long to complete this connection. Start a new connection and try again.',
-  failed:'Google could not complete the connection. Try again.',
-};
+const providers={
+  gmail:{name:'Gmail',description:'Find received emails for your private Contacts and choose which ones to log. Harbor won’t send mail using this connection.',view:'email-settings',brand:'Google',group:'google'},
+  calendar:{name:'Google Calendar',description:'Check whether your primary calendar is free or busy. Harbor won’t read event details or send invitations using this connection.',view:'calendar',brand:'Google',group:'google'},
+  'outlook-mail':{name:'Outlook Mail',description:'Find recent messages from a private contact and choose which ones to add to their timeline.',view:'email-settings',brand:'Microsoft',group:'outlook'},
+  'outlook-calendar':{name:'Outlook Calendar',description:'Check availability on your primary calendar and choose past meetings to log on a private contact.',view:'calendar',brand:'Microsoft',group:'outlook'},
+} as const;
+function connectionNotices(brand:string):Record<string,string>{
+  return {
+    connected:brand+' connection saved.',
+    expired:'That connection attempt expired or was already used. Start again from this browser.',
+    permissions:brand+' did not grant the requested read access. Try connecting again.',
+    denied:brand+' access was not granted.',
+    wrong_account:brand==='Microsoft'?'Choose the Microsoft mailbox whose primary address matches your Harbor email.':'Choose the same Google account you used to sign in to Harbor.',
+    reconnect:'Start a new connection from Harbor and grant the requested read permissions.',
+    setup:'This connection needs setup by your Harbor administrator.',
+    provider_unavailable:brand+' took too long to complete this connection. Start a new connection and try again.',
+    failed:brand+' could not complete the connection. Try again.',
+  };
+}
 
-export function PortableGooglePanel({provider,status:initialStatus,outcome}:{provider:'gmail'|'calendar';status:PersonalGoogleStatus;outcome?:string}){
+export function PortableConnectionPanel({provider,status:initialStatus,outcome}:{provider:keyof typeof providers;status:PersonalConnectionStatus;outcome?:string}){
   const router=useRouter();
   const [busy,setBusy]=useState(false);
   const [result,setResult]=useState<{ok:boolean;message:string}>();
@@ -25,12 +34,12 @@ export function PortableGooglePanel({provider,status:initialStatus,outcome}:{pro
   const unavailable=initialStatus==='unavailable';
   const status=unavailable?null:initialStatus;
   const removing=status?.id===removingId;
-  const gmail=provider==='gmail';
-  const name=gmail?'Gmail':'Google Calendar';
-  const Icon=gmail?Mail:CalendarDays;
+  const {name,description,brand,group,view}=providers[provider];
+  const Icon=view==='email-settings'?Mail:CalendarDays;
+  const notices=connectionNotices(brand);
   const connection=unavailable?'unavailable':status?.needsReconnect?'reconnect':status?'connected':'disconnected';
   const connectionLabel=unavailable?'Status unavailable':status?.needsReconnect?'Reconnect needed':status?'Connected':'Not connected';
-  const endpoint='/api/google/connections?provider='+provider;
+  const endpoint='/api/'+group+'/connections?provider='+provider;
   const notice=outcome&&Object.hasOwn(notices,outcome)?notices[outcome]:undefined;
   async function run(disconnect:boolean){
     if(busy||!status||(disconnect&&!removing))return;
@@ -48,7 +57,7 @@ export function PortableGooglePanel({provider,status:initialStatus,outcome}:{pro
       }
       if(!response.ok||(disconnect?data?.disconnected!==true:data?.connection!=='ok'))throw Error();
       setResult({ok:true,message:disconnect?name+' disconnected from Harbor.':name+' connection verified.'});
-      if(disconnect)router.replace(provider==='gmail'?'/?view=email-settings':'/?view=calendar');
+      if(disconnect)router.replace('/?view='+view);
     }catch{
       setResult({ok:false,message:disconnect?'Could not confirm the disconnect. Check the connection below before trying again.':
         'Could not verify this connection. Try again.'});
@@ -60,8 +69,7 @@ export function PortableGooglePanel({provider,status:initialStatus,outcome}:{pro
       <span className="portable-provider-icon"><Icon size={20} aria-hidden="true"/></span>
       <div>
         <h2>Personal {name}</h2>
-        <p>{gmail?'Find received emails for your private Contacts and choose which ones to log. Harbor won’t send mail using this connection.':
-          'Check whether your primary calendar is free or busy. Harbor won’t read event details or send invitations using this connection.'}</p>
+        <p>{description}</p>
       </div>
     </header>
     <div className="portable-provider-connection">
@@ -83,7 +91,7 @@ export function PortableGooglePanel({provider,status:initialStatus,outcome}:{pro
     {!unavailable&&(result?<p role={result.ok?'status':'alert'}>{result.message}</p>:
       notice&&(outcome!=='connected'||status)&&<p role={outcome==='connected'?'status':'alert'}>{notice}</p>)}
     {status&&removing&&<div className="portable-provider-confirmation">
-      <p>Harbor will stop using this account. To also remove the grant at Google, remove Harbor’s access in your Google Account.</p>
+      <p>Harbor will stop using this account. {brand==='Microsoft'?'You can also revoke Harbor’s permissions in your Microsoft account.':'To also remove the grant at Google, remove Harbor’s access in your Google Account.'}</p>
       <div className="portable-provider-actions">
         <button type="button" disabled={busy} onClick={()=>void run(true)}>Disconnect {name}</button>
         <button type="button" disabled={busy} onClick={()=>setRemovingId(null)}>Keep connected</button>

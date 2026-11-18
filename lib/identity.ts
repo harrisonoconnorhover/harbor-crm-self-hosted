@@ -18,7 +18,7 @@ export function loginOrigin(env:IdentityEnvironment) {
   if((origin.protocol!=='https:'&&!local)||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw Error('Set a secure Harbor login origin.');
   return origin;
 }
-function parseAllowedEmails(value:string|undefined) {
+export function parseAllowedEmails(value:string|undefined) {
   const allowedEmails=(value||'').split(',').map(v=>v.trim().toLowerCase());
   if(allowedEmails.length>100||allowedEmails.some(v=>!/^[-a-z0-9.!#$%&'+/=?^_`{|}~]+@[-a-z0-9]+(?:\.[-a-z0-9]+)+$/.test(v)||v.length>254))throw Error('Configure the allowed Google sign-in email addresses.');
   return allowedEmails;
@@ -65,11 +65,13 @@ export function authCookie(kind:'session'|'attempt',value:string,secure:boolean,
 export function identityRequestFailure(request:Request,env:IdentityEnvironment):Response|null {
   try{
     if(authMode(env)==='sites')return null;
-    const config=loginConfig(env);
+    return sessionRequestFailure(request,loginConfig(env));
+  }catch{return new Response('Harbor sign-in needs configuration. Contact the workspace administrator.',{status:503,headers:{'cache-control':'no-store'}});}
+}
+export function sessionRequestFailure(request:Request,config:{origin:string;secure:boolean}):Response|null {
     if(new URL(request.url).origin!==config.origin)return new Response('Harbor login origin does not match this deployment.',{status:421});
     const unsafe=!['GET','HEAD','OPTIONS'].includes(request.method);
     if(unsafe&&readCookie(request.headers,cookieName('session',config.secure))&&request.headers.get('origin')!==config.origin)
       return Response.json({error:'Submit this action from Harbor.'},{status:403,headers:{'cache-control':'no-store'}});
     return null;
-  }catch{return new Response('Harbor sign-in needs configuration. Contact the workspace administrator.',{status:503,headers:{'cache-control':'no-store'}});}
 }

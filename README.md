@@ -4,7 +4,9 @@ Harbor is a self-hosted CRM for teams. Manage contacts, companies, deals and tas
 
 ## Install and try it
 
-Follow the [self-host guide](docs/self-host.md) to build the Docker image, set up PostgreSQL 18, private S3-compatible storage and Google sign-in, and invite a second user. The web app and optional Notes worker use the same image. Each workspace supports 25 active members and pending invitations combined.
+Follow the [self-host guide](docs/self-host.md) to build the Docker image, set up PostgreSQL 18, private S3-compatible storage and your sign-in provider, and invite a second user. The web app and optional Notes worker use the same image. Each workspace supports 25 active members and pending invitations combined.
+
+For a Microsoft 365 team or personal Outlook.com mailbox, the [Microsoft sign-in and Outlook guide](docs/microsoft-outlook.md) covers app registration, individual consent, and logging a selected email or completed meeting on a contact.
 
 Start with fictional records. The guide walks through revoking a teammate, verifying a private file and restoring a matched database and file backup. Before using customer data, check your HTTPS setup, real identity provider, recovery time and operator alerts on your own installation.
 
@@ -16,7 +18,7 @@ With Docker and Git installed, run:
 bash scripts/local-test.sh portable
 ```
 
-The end-to-end suite starts PostgreSQL, simulated Google and private test file storage inside a network-isolated container. It checks sign-in, workspace permissions, the web app, background jobs and a second-instance recovery. Allow about 15 minutes after the build.
+The end-to-end suite starts PostgreSQL, simulated identity and mail providers, and private test file storage inside a network-isolated container. It checks sign-in, workspace permissions, the web app, background jobs and a second-instance recovery. Allow about 15 minutes after the build.
 
 ## Dependency status
 

@@ -1,4 +1,4 @@
-import {and,asc,eq,gt,inArray,lte} from 'drizzle-orm';
+import {and,asc,eq,gt,inArray,isNotNull,lte,sql} from 'drizzle-orm';
 import {drizzle,type PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type {GoogleIdentityStore} from '../../lib/identity-service';
@@ -16,15 +16,39 @@ export async function lockPortableLoginSession(tx:Transaction,actor:PostgresSess
   return Boolean(session);
 }
 
-export function postgresIdentityStore(db:PostgresJsDatabase):GoogleIdentityStore{
+type PortableProviderPolicy={
+  provider:'google'|'microsoft';
+  reservedForMicrosoft:(email:string)=>boolean;
+  activeSession:(microsoftSubject:string|null,email:string)=>boolean;
+};
+export function postgresIdentityStore(db:PostgresJsDatabase,policy?:PortableProviderPolicy):GoogleIdentityStore{
   return {
     async recordIdentity(identity,now){
-      const [account]=await db.insert(loginIdentities).values({
-        id:crypto.randomUUID(),googleSubject:identity.subject,email:identity.email,fullName:identity.fullName,createdAt:now,updatedAt:now,
-      }).onConflictDoUpdate({
-        target:loginIdentities.googleSubject,set:{email:identity.email,fullName:identity.fullName,updatedAt:now},
-      }).returning({id:loginIdentities.id});
-      return account.id;
+      const microsoft=policy?.provider==='microsoft';
+      const subject=microsoft?loginIdentities.microsoftSubject:loginIdentities.googleSubject;
+      return db.transaction(async tx=>{
+        // Two web processes may receive callbacks for the same address concurrently.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${identity.email},0))`);
+        const conflict=microsoft?sql`${loginIdentities.microsoftSubject} IS DISTINCT FROM ${identity.subject}`
+          :isNotNull(loginIdentities.microsoftSubject);
+        const [occupant]=await tx.select({id:loginIdentities.id}).from(loginIdentities)
+          .where(and(eq(loginIdentities.email,identity.email),conflict)).limit(1);
+        if(occupant)throw Error('This Harbor address already belongs to another identity.',{cause:'account-conflict'});
+        if(!microsoft&&policy?.reservedForMicrosoft(identity.email)){
+          const [incumbent]=await tx.select({id:loginIdentities.id}).from(loginIdentities)
+            .where(and(eq(loginIdentities.email,identity.email),eq(loginIdentities.googleSubject,identity.subject))).limit(1);
+          if(!incumbent)throw Error('This address is reserved for a pinned Microsoft account.',{cause:'account-conflict'});
+        }
+        const [account]=await tx.insert(loginIdentities).values({
+          id:crypto.randomUUID(),...(microsoft?{microsoftSubject:identity.subject}:{googleSubject:identity.subject}),
+          email:identity.email,fullName:identity.fullName,createdAt:now,updatedAt:now,
+        }).onConflictDoUpdate({
+          target:subject,set:{email:identity.email,fullName:identity.fullName,updatedAt:now},
+          setWhere:microsoft?eq(loginIdentities.email,identity.email):undefined,
+        }).returning({id:loginIdentities.id});
+        if(!account)throw Error('The stored Microsoft account uses a different Harbor address.',{cause:'account-conflict'});
+        return account.id;
+      });
     },
     async saveSession(session){
       await db.transaction(async tx=>{
@@ -35,10 +59,11 @@ export function postgresIdentityStore(db:PostgresJsDatabase):GoogleIdentityStore
       });
     },
     async findSession(tokenHash,now){
-      const [identity]=await db.select({userId:loginIdentities.id,email:loginIdentities.email,fullName:loginIdentities.fullName})
+      const [identity]=await db.select({userId:loginIdentities.id,email:loginIdentities.email,fullName:loginIdentities.fullName,microsoftSubject:loginIdentities.microsoftSubject})
         .from(loginSessions).innerJoin(loginIdentities,eq(loginIdentities.id,loginSessions.userId))
         .where(and(eq(loginSessions.tokenHash,tokenHash),gt(loginSessions.expiresAt,now)));
-      return identity;
+      if(!identity||!(policy?policy.activeSession(identity.microsoftSubject,identity.email):!identity.microsoftSubject))return;
+      return {userId:identity.userId,email:identity.email,fullName:identity.fullName};
     },
     async revokeSession(tokenHash,allDevices,now){
       if(allDevices){

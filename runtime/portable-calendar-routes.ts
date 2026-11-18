@@ -1,3 +1,4 @@
+import {personalConnectionActor} from './portable-connection-session';
 import {z} from 'zod';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {CALENDAR_AVAILABILITY_SCOPES,CalendarError,calendarBusy,calendarIdentity,calendarTokens} from '../lib/calendar/google';
@@ -9,7 +10,7 @@ import {portableCalendarSlotHeld,portableOpenCalendarSlots} from '../db/postgres
 import {portableDb} from './portable-db';
 import {calendarSuggestionInput,calendarSuggestionWindow,slotsOutsideGoogleBusy} from '../lib/calendar/suggestions';
 import {portablePersonalGoogleConfig} from './portable-google-config';
-import {boundedGoogleRead,personalGoogleAccess,personalGoogleActor} from './portable-google-connections';
+import {boundedGoogleRead,personalGoogleAccess} from './portable-google-connections';
 import {ApiError} from '../lib/api-error';
 
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'cache-control':'private, no-store'}});
@@ -34,7 +35,7 @@ export async function POST(request:Request){
     let personalConnection:Awaited<ReturnType<typeof personalGoogleAccess>>|undefined;
     async function personalAccess(){
       if(!personalConfig)throw new ApiError(403,'Calendar is unavailable for this account.');
-      personalConnection=await personalGoogleAccess(request,await personalGoogleActor(request,signedIn),'calendar',personalConfig,{calendarFetch});
+      personalConnection=await personalGoogleAccess(request,await personalConnectionActor(request,signedIn),'calendar',personalConfig,{calendarFetch});
       return personalConnection.accessToken;
     }
     function readBusy(accessToken:string,start:string,end:string){

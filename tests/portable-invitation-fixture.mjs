@@ -33,7 +33,7 @@ export async function verifyPortableInvitations({request,origin,headers,other,si
   assert.match((await unapproved.json()).error,/Ask your Harbor administrator/);
   const self=await invite('owner@example.test');
   await assertStatus(self,404,'Reject an invitation to the owner');
-  assert.match((await self.json()).error,/teammate’s Google email/);
+  assert.match((await self.json()).error,/teammate’s email/);
   assert.equal((await sql`SELECT count(*)::int AS count FROM login_identities WHERE email=${email}`)[0].count,0);
   const prepared=await invite('INVITEE@example.test');
   await assertStatus(prepared,200,'Prepare a Viewer invitation');

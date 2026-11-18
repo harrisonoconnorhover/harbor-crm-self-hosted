@@ -29,6 +29,8 @@ import {verifyPublishedAvailability} from './published-availability-fixture.mjs'
 import {verifyPortableBookingPagination} from './portable-booking-pagination-fixture.mjs';
 import {verifyPortableGmailDisabled,verifyPortableScheduledGmail} from './portable-gmail-fixture.mjs';
 import {verifyPortableEmailTemplates} from './portable-email-templates-fixture.mjs';
+import {outlookFixture,verifyOutlookConnections} from './portable-outlook-connection-fixture.mjs';
+import {verifyOutlookRecords} from './portable-outlook-records-fixture.mjs';
 import {personalGoogleFixture,verifyPersonalGoogle} from './portable-google-fixture.mjs';
 import {portableInboxFixture,verifyPortableInbox} from './portable-gmail-inbox-fixture.mjs';
 import {verifyPortableJobOperations,verifyPortableNoteRetry} from './portable-job-operations-fixture.mjs';
@@ -148,6 +150,8 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
         import {calendarFetch} from ${JSON.stringify(calendar.path)};
         import {inboxFetch} from ${JSON.stringify(new URL('./portable-gmail-inbox-fixture.mjs',import.meta.url).href)};
         import {personalGoogleFetch} from ${JSON.stringify(new URL('./portable-google-fixture.mjs',import.meta.url).href)};
+        import {outlookConnectionFetch} from ${JSON.stringify(new URL('./portable-outlook-connection-fixture.mjs',import.meta.url).href)};
+        import {outlookRecordsFetch} from ${JSON.stringify(new URL('./portable-outlook-records-fixture.mjs',import.meta.url).href)};
         const original=globalThis.fetch;
         globalThis.fetch=async (resource,options)=>{
           const url=new URL(resource);
@@ -162,6 +166,8 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
             await appendFile(process.env.HARBOR_TEST_GUEST_PROOF_LOG,JSON.stringify(readGuestMail(options))+'\\n');
             throw TypeError('Fictional Gmail accepted a code and lost the receipt');
           }
+          const outlook=await outlookConnectionFetch(url,options)??await outlookRecordsFetch(url,options);
+          if(outlook)return outlook;
           const personal=await personalGoogleFetch(url,options);
           if(personal)return personal;
           const inbox=await inboxFetch(url,options);
@@ -638,6 +644,15 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       t.diagnostic('Two account-bound personal Google connections used separate Gmail inboxes and Calendar windows.');
       await stop();
       for(const key of Object.keys(personalGoogle))delete env[key];
+      const microsoft=outlookFixture(directory);
+      Object.assign(env,microsoft);
+      await start();
+      await verifyOutlookConnections({request,origin,headers,other,sql,fixture:microsoft,verifyRecords:verifyOutlookRecords});
+      await sql`DELETE FROM portable_request_budgets WHERE scope IN ('api_read','api_write')
+        AND subject IN (SELECT id FROM login_identities WHERE email IN ('owner@example.test','other@example.test'))`;
+      t.diagnostic('Personal Outlook Mail and Calendar matched separate accounts, checked availability and selectively logged activities.');
+      await stop();
+      for(const key of Object.keys(microsoft))delete env[key];
       if(originalMode===undefined)delete env.HARBOR_PORTABLE_MODE;else env.HARBOR_PORTABLE_MODE=originalMode;
       await start();
       assert.equal(record.primaryCompanyName,'Owner Company');

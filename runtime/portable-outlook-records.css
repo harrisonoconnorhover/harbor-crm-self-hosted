@@ -1,0 +1,25 @@
+.portable-contacts .portable-outlook-history fieldset {
+  align-items: end;
+  min-inline-size: 0;
+  margin: 0;
+}
+.portable-outlook-history p { overflow-wrap: anywhere; }
+.portable-outlook-history > ul > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 16px;
+}
+.portable-outlook-item { display: grid; gap: 3px; }
+.portable-outlook-item time, .portable-outlook-history li > span { color: #486466; }
+.portable-outlook-item p { margin: 3px 0 0; }
+.portable-contacts .portable-outlook-attendance {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-block-start: 5px;
+}
+@media (max-width: 560px) {
+  .portable-outlook-history > ul > li { grid-template-columns: 1fr; }
+  .portable-outlook-history li > button { justify-self: start; }
+}

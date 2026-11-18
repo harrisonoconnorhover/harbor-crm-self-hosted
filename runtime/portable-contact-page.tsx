@@ -1,10 +1,12 @@
-import {readGoogleGrantStatus} from '../db/postgres/portable-google-store';
+import {outlookConfig} from './portable-outlook-provider';
+import type {PersonalConnectionProvider} from '../db/postgres/portable-google-schema';
+import {readConnectionGrantStatus} from '../db/postgres/portable-connection-store';
 import {portablePersonalGoogleConfig,portablePersonalGoogleReadiness} from './portable-google-config';
 import {listPortableCustomProperties} from '../db/postgres/custom-property-store';
 import {notFound} from 'next/navigation';
 import {z} from 'zod';
 import {guestWorkspaceAllowed} from '../db/postgres/workspace-sign-in-store';
-import {loginConfig} from '../lib/identity';
+import {portableLoginConfig as loginConfig} from './portable-login-config';
 import {env} from './portable-env';
 import {inviteSignInEnabled,portableWorkspaceGuest} from './portable-identity';
 import {readWorkspaceInvitation} from '../db/postgres/workspace-invite-store';
@@ -75,15 +77,15 @@ async function guestHome(user:{userId:string;email:string}){
   return <PortableGuestHome email={user.email} initial={await initialWorkspaceSharing(user,true)}/>;
 }
 
-async function personalGoogleStatus(user:{userId:string;email:string},provider:'gmail'|'calendar'){
-  try{return await readGoogleGrantStatus(portableDb(),user,provider);}
+async function personalConnectionStatus(user:{userId:string;email:string},provider:PersonalConnectionProvider){
+  try{return await readConnectionGrantStatus(portableDb(),user,provider);}
   catch{
-    console.warn(JSON.stringify({event:'harbor_portable_google_status_unavailable',provider}));
+    console.warn(JSON.stringify({event:provider.startsWith('outlook-')?'harbor_portable_outlook_status_unavailable':'harbor_portable_google_status_unavailable',provider}));
     return 'unavailable' as const;
   }
 }
 
-export default async function RecordsPage({searchParams}:{searchParams:Promise<{add?:string;kind?:string;view?:string;reportId?:string;dashboardId?:string;savedView?:string;formId?:string;filter?:string;followUp?:string;inquiries?:string;inquirySearch?:string;runWorkflowId?:string;runDealId?:string;runIssue?:string;afterAt?:string;afterId?:string;afterFinishedAt?:string;queue?:string;jobOrder?:string;jobId?:string;jobKind?:string;jobIssue?:string;jobContactId?:string;taskQueueId?:string;taskView?:string;taskZone?:string;taskAssignee?:string;taskPriority?:string;taskType?:string;contact?:string;contactId?:string;status?:string;record?:string;companyId?:string;dealId?:string;primaryContactId?:string;search?:string;owner?:string;after?:string;stage?:string;pipelineId?:string;closeMonth?:string;workspaceId?:string;invitation?:string;google?:string}>}){
+export default async function RecordsPage({searchParams}:{searchParams:Promise<{add?:string;kind?:string;view?:string;reportId?:string;dashboardId?:string;savedView?:string;formId?:string;filter?:string;followUp?:string;inquiries?:string;inquirySearch?:string;runWorkflowId?:string;runDealId?:string;runIssue?:string;afterAt?:string;afterId?:string;afterFinishedAt?:string;queue?:string;jobOrder?:string;jobId?:string;jobKind?:string;jobIssue?:string;jobContactId?:string;taskQueueId?:string;taskView?:string;taskZone?:string;taskAssignee?:string;taskPriority?:string;taskType?:string;contact?:string;contactId?:string;status?:string;record?:string;companyId?:string;dealId?:string;primaryContactId?:string;search?:string;owner?:string;after?:string;stage?:string;pipelineId?:string;closeMonth?:string;workspaceId?:string;invitation?:string;google?:string;outlook?:string}>}){
   const pageQuery=await searchParams;
   const wantsBoard=pageQuery.kind==='deals'&&pageQuery.view==='board';
   const runWorkflowId=portableRunWorkflowId.optional().safeParse(pageQuery.runWorkflowId===''?undefined:pageQuery.runWorkflowId);
@@ -134,7 +136,7 @@ export default async function RecordsPage({searchParams}:{searchParams:Promise<{
       listPortableCustomProperties(db,user.userId,'contacts'),
       readiness&&Promise.all(readiness.map(async entry=>{
         if(entry.status!=='ready')return entry;
-        const grant=await personalGoogleStatus(user,entry.provider);
+        const grant=await personalConnectionStatus(user,entry.provider);
         if(grant==='unavailable')return {...entry,connection:'unavailable'} as const;
         const connection=grant?(grant.needsReconnect?'reconnect':'connected'):'not_connected';
         return {...entry,connection} as const;
@@ -343,13 +345,15 @@ export default async function RecordsPage({searchParams}:{searchParams:Promise<{
   }
   const legacyCalendar=portableCalendarConfig()?.owner===user.email.toLowerCase();
   const personalCalendar=!!portablePersonalGoogleConfig('calendar')&&!legacyCalendar;
-  const calendarAvailable=legacyCalendar||personalCalendar;
+  const outlookCalendar=Boolean(outlookConfig('outlook-calendar'));
+  const calendarAvailable=legacyCalendar||personalCalendar||outlookCalendar;
   const calendarInvites=legacyCalendar&&portableCalendarInvitesEnabled();
   if(view==='calendar'){
     const cursor=portableWorkflowCursor.optional().safeParse(afterAt!==undefined||afterId!==undefined?{at:afterAt,id:afterId}:undefined);
     if(workspaceId||!calendarAvailable||!cursor.success)notFound();
     const meetings=calendarInvites?await listPortableMeetings(portableDb(),user.userId,cursor.data,filter==='needs_review'):undefined;
-    return withPortableNavigation(user.email,<PortableCalendar email={user.email} meetings={meetings} personal={personalCalendar?await personalGoogleStatus(user,'calendar'):undefined}
+    return withPortableNavigation(user.email,<PortableCalendar email={user.email} meetings={meetings} legacyGoogle={legacyCalendar}
+      outlook={outlookCalendar?await personalConnectionStatus(user,'outlook-calendar'):undefined} outlookOutcome={pageQuery.outlook} personal={personalCalendar?await personalConnectionStatus(user,'calendar'):undefined}
       googleOutcome={pageQuery.google} cancellationsEnabled={portableCalendarCancellationsEnabled()}
       reschedulesEnabled={portableCalendarReschedulesEnabled()}/>);
   }
@@ -361,7 +365,8 @@ export default async function RecordsPage({searchParams}:{searchParams:Promise<{
     if(workspaceId)notFound();
     const inboxAvailable=portableGmailInboxOwner()===user.email.toLowerCase();
     return withPortableNavigation(user.email,<PortableEmailSettings email={user.email} inboxAvailable={inboxAvailable}
-      personal={!inboxAvailable&&portablePersonalGoogleConfig('gmail')?await personalGoogleStatus(user,'gmail'):undefined} googleOutcome={pageQuery.google}/>);
+      outlook={outlookConfig('outlook-mail')?await personalConnectionStatus(user,'outlook-mail'):undefined} outlookOutcome={pageQuery.outlook}
+      personal={!inboxAvailable&&portablePersonalGoogleConfig('gmail')?await personalConnectionStatus(user,'gmail'):undefined} googleOutcome={pageQuery.google}/>);
   }
   const db=portableDb();
   if(view==='job-queue'){
@@ -446,9 +451,16 @@ export default async function RecordsPage({searchParams}:{searchParams:Promise<{
     totals:await readDealSummary(db,user.userId,selectedPipeline,closeMonth.data,workspaceId)}:undefined;
   const gmailSender=!workspaceId&&portableGmailOwner()===user.email.toLowerCase()?user.email.toLowerCase():undefined;
   const legacyInbox=portableGmailInboxOwner()===user.email.toLowerCase();
-  const personalInbox=kind==='contacts'&&!workspaceId&&!legacyInbox&&!!portablePersonalGoogleConfig('gmail')&&await personalGoogleStatus(user,'gmail');
+  const personalInbox=kind==='contacts'&&!workspaceId&&!legacyInbox&&!!portablePersonalGoogleConfig('gmail')&&await personalConnectionStatus(user,'gmail');
   const gmailInboxEnabled=kind==='contacts'&&!workspaceId&&(legacyInbox||!!personalInbox&&personalInbox!=='unavailable'&&!personalInbox.needsReconnect);
+  const privateContacts=kind==='contacts'&&!workspaceId;
+  const [mailGrant,calendarGrant]=privateContacts?await Promise.all([
+    outlookConfig('outlook-mail')&&personalConnectionStatus(user,'outlook-mail'),
+    outlookCalendar&&personalConnectionStatus(user,'outlook-calendar'),
+  ]):[];
   return <PortableRecords key={kind+':'+(grant?.id??'own')+':'+(id.data??relatedId??'list')} kind={kind} email={user.email} workspaceId={workspaceId} grant={grant}
+    outlookMailEnabled={Boolean(mailGrant&&mailGrant!=='unavailable'&&!mailGrant.needsReconnect)}
+    outlookCalendarEnabled={Boolean(calendarGrant&&calendarGrant!=='unavailable'&&!calendarGrant.needsReconnect)}
     gmailSender={gmailSender} gmailInboxEnabled={gmailInboxEnabled} calendarAvailable={calendarAvailable} calendarInvites={calendarInvites} initialRecord={initial&&'data' in initial?initial:undefined} related={related} filesEnabled={objectStorageConfigured()} records={result.records}
     startNewDeal={addingLinkedDeal&&(!workspaceId||grant?.role==='editor')}
     pipelines={pipelines} board={board} summary={summary} closeMonth={filters.closeMonth} pipelineId={selectedPipeline?.id??(parsed.success?parsed.data.pipelineId:undefined)}

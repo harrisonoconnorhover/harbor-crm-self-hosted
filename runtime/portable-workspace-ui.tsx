@@ -1,9 +1,10 @@
 'use client';
-import {useEffect,useRef,useState,type FormEvent} from 'react';
+import {useEffect,useId,useRef,useState,type FormEvent} from 'react';
 import Link from 'next/link';
 import type {readWorkspaceInvitation} from '../db/postgres/workspace-invite-store';
 import {workspaceInvitationPath,workspaceRole,workspaceSeatLimit,type SharedRecordWriteScope,type WorkspacePermission,type WorkspaceRole} from '../lib/portable-workspace-access';
 import {acceptReviewedWorkspaceInvitation,declineReviewedWorkspaceInvitation,readWorkspaceAccess,saveWorkspaceAccess} from './portable-invitation-acceptance';
+import {openRoleGuide,optionalAccess,WorkspaceRoleGuide} from './portable-workspace-role-guide';
 import './portable-contacts.css';
 import './portable-settings.css';
 import './portable-workspace-directory.css';
@@ -18,18 +19,8 @@ type Change={action:'grant';email:string}|{action:'invite';email:string;role:Wor
 const roleLabel={viewer:'Viewer',editor:'Editor'} as const;
 type Member=WorkspaceSharing['viewers'][number];
 type UpdateSharing=(data:Change)=>Promise<boolean>;
-const optionalAccess=[
-  {field:'contactFiles',action:'contact_files',label:'Contact files',accessible:'Share contact files',
-    hint:'Includes earlier versions. Editors can upload and replace files.'},
-  {field:'scheduledNotes',action:'scheduled_notes',label:'Scheduled notes',accessible:'Share scheduled notes',
-    hint:'Viewers can read scheduled notes. Editors can schedule new ones.'},
-  {field:'contactOutreach',action:'contact_outreach',label:'Contact outreach',accessible:'Share logged Contact outreach',
-    hint:'Viewers can read logged outreach. Editors can log completed activities.'},
-  {field:'recordActivities',action:'record_activities',label:'Company and deal activities',accessible:'Share logged Company and Deal activities',
-    hint:'Shares logged calls, meetings and notes across this workspace’s companies and deals. Editors can also log activities.'},
-] as const;
-
-function InvitationAccessPreview({role}:{role:WorkspaceRole}){
+const workspaceGuideId='workspace-role-guide';
+function InvitationAccessPreview({role,guideId,compact=false}:{role:WorkspaceRole;guideId?:string;compact?:boolean}){
   const editing=role==='editor';
   return <section className="portable-access-preview" aria-label="Invitation access preview">
     <h3 aria-live="polite">{editing?'What an Editor can do':'What a Viewer can do'}</h3>
@@ -39,8 +30,11 @@ function InvitationAccessPreview({role}:{role:WorkspaceRole}){
       <div><dt>Search and dashboards</dt><dd>Search records across this workspace and open the dashboards its owner shares.</dd></div>
       <div><dt>Tasks</dt><dd>{editing?'Create, assign and complete shared tasks.':'Read shared tasks and their due dates.'}</dd></div>
       <div><dt>Activity history and files</dt><dd>Contact outreach, company and deal activities, scheduled notes and contact files each need an extra permission.</dd></div>
-      <div><dt>Personal connections</dt><dd>The owner’s Gmail and Calendar stay private.</dd></div>
+      <div><dt>Personal connections</dt><dd>The owner’s mail and calendar connections stay private.</dd></div>
     </dl>
+    {compact?<Link href={'/?view=workspaces#'+workspaceGuideId+'-'+role}>Compare roles in Workspaces</Link>:guideId?<a href={'#'+guideId} onClick={event=>{
+      if(!event.metaKey&&!event.ctrlKey&&!event.shiftKey&&!event.altKey)openRoleGuide(guideId,role);
+    }}>Compare all four roles</a>:<WorkspaceRoleGuide initialRole={role} guideId="invitation-role-guide"/>}
   </section>;
 }
 
@@ -62,7 +56,7 @@ function RemovalControl({invitation=false,email,remove}:{invitation?:boolean;ema
   </details>;
 }
 
-function MemberAccess({member,change,remove,managed}:{member:Member;change:UpdateSharing;remove:()=>void;managed?:ManagedDirectory}){
+function MemberAccess({member,change,remove,managed,inviteSignIn}:{member:Member;change:UpdateSharing;remove:()=>void;managed?:ManagedDirectory;inviteSignIn:boolean}){
   const extras=optionalAccess.filter(item=>member[item.field]).length;
   const protectedAdmin=Boolean(managed&&member.backupAdmin);
   const restrictedPromotion=Boolean(managed&&member.role==='viewer'&&optionalAccess.some(item=>member[item.field]&&!managed.permissions[item.field]));
@@ -94,7 +88,9 @@ function MemberAccess({member,change,remove,managed}:{member:Member;change:Updat
           aria-label={'Backup administrator for '+member.email} onChange={event=>void change({action:'backup_admin',id:member.id,enabled:event.target.checked})}/>
           <span><strong>Backup administrator</strong><small>
             {member.role==='viewer'?'Choose Editor to appoint this teammate.':
-              'Can invite, manage and remove ordinary teammates and share the extra permissions they already have. Only the owner appoints administrators. Switching to Viewer removes this appointment.'}
+              'Can manage ordinary teammates and delegate permissions they hold. '+(inviteSignIn?
+                'Their invitations can let eligible new accounts sign in to this host.':'This host requires the invited account to be approved for sign-in first.')+
+              ' Switching to Viewer removes this appointment.'}
           </small></span></label>
       </fieldset>}
       {protectedAdmin?<p>Only the owner can change a backup administrator’s access.</p>:<RemovalControl key={member.id} email={member.email} remove={remove}/>}
@@ -118,6 +114,8 @@ const savedMessages:Partial<Record<Change['action'],string>>={
 };
 
 export function PortableWorkspaceSharing({guest=false,expanded=false,initial,scope}:{guest?:boolean;expanded?:boolean;initial?:WorkspaceSharing;scope?:SharedRecordWriteScope}={}){
+  const instanceId=useId();
+  const guideId=expanded&&!scope?workspaceGuideId:instanceId;
   const [refreshedSharing,setSharing]=useState<WorkspaceSharing>();
   const sharing=refreshedSharing??initial;
   const [busy,setBusy]=useState(false);
@@ -133,11 +131,16 @@ export function PortableWorkspaceSharing({guest=false,expanded=false,initial,sco
   const inviteForm=useRef<HTMLDetailsElement>(null);
   const canInvite=expanded&&!guest&&!!sharing;
   useEffect(()=>{
-    if(canInvite&&window.location.hash==='#invite-teammate'&&inviteForm.current){
+    if(!canInvite)return;
+    const hash=window.location.hash;
+    for(const role of ['editor','viewer'] as const){
+      if(hash==='#'+guideId+'-'+role)openRoleGuide(guideId,role);
+    }
+    if(hash==='#invite-teammate'&&inviteForm.current){
       inviteForm.current.open=true;
       inviteForm.current.querySelector<HTMLInputElement>('input[name="email"]')?.focus();
     }
-  },[canInvite]);
+  },[canInvite,guideId]);
   useEffect(()=>{
     if(initial)return;
     const controller=new AbortController();
@@ -248,6 +251,7 @@ export function PortableWorkspaceSharing({guest=false,expanded=false,initial,sco
     {!sharing&&!error&&<p role="status">Loading workspace access…</p>}
     {(notice||busy)&&<p role="status">{notice||'Updating workspace access…'}</p>}
     {sharing&&<>
+      {(expanded||guest)&&<WorkspaceRoleGuide initialRole={sharing.managed?'backup':guest?'viewer':'owner'} guideId={guideId}/>}
       {(guest||!expanded||sharing.shared.length>0)&&<><h2>Shared with you</h2>
       {sharing.shared.length?<ul>{sharing.shared.map(workspace=><li key={workspace.id}>
         <a href={'/?workspaceId='+workspace.id}>Workspace from {workspace.ownerEmail}</a>
@@ -271,10 +275,10 @@ export function PortableWorkspaceSharing({guest=false,expanded=false,initial,sco
         <label>Invitation role
           <select name="inviteRole" value={inviteRole} onChange={event=>setInviteRole(workspaceRole.parse(event.target.value))}><option value="viewer">Viewer</option><option value="editor">Editor</option></select>
         </label>
-        <InvitationAccessPreview role={inviteRole}/>
+        <InvitationAccessPreview role={inviteRole} guideId={guideId} compact={!expanded}/>
         <button type="submit">Prepare invitation</button>
-        <p>{sharing.inviteSignIn?'Share the link with your teammate. They must sign in with this Google account.':
-          'Share the link yourself. This Google account must already be approved for Harbor sign-in.'}</p>
+        <p>{sharing.inviteSignIn?'Share the link with your teammate. They must sign in with this account.':
+          'Share the link yourself. This account must already be approved for Harbor sign-in.'}</p>
       </form>
       <p><strong>Handing off a deal?</strong> After the teammate joins, open their name in the Team directory and turn on <b>Company and deal activities</b> to share logged calls, meetings and notes. Contact outreach and files are separate choices.</p>
       {sharing.owned&&<details className="portable-access-direct"><summary>Grant access without an invitation</summary>
@@ -315,7 +319,8 @@ export function PortableWorkspaceSharing({guest=false,expanded=false,initial,sco
       </>}
       {(members.length>0||(!needle&&expanded))&&<h3>People with access <span className="portable-access-tally">{members.length}</span></h3>}
       {members.length>0?<ul className="portable-access-list">{members.map(member=><li key={repeatedEmails.has(member.email)?member.id:member.email}>
-        <MemberAccess member={member} managed={sharing.managed} change={change} remove={()=>void remove({action:'revoke',id:member.id})}/>
+        <MemberAccess member={member} managed={sharing.managed} inviteSignIn={!!sharing.inviteSignIn}
+          change={change} remove={()=>void remove({action:'revoke',id:member.id})}/>
       </li>)}</ul>:!needle&&expanded&&<p className="portable-settings-empty">No teammates have access yet.</p>}
       </fieldset>
       {sharing.owned&&<details className="portable-access-review"><summary>Review assignments after access changes</summary>
@@ -379,7 +384,7 @@ export function PortableInvitationPage({id,email,review}:{id:string;email:string
       setBusy(undefined);
     }
   }
-  const signIn='/auth/google/start?'+new URLSearchParams({return_to:workspaceInvitationPath(id)});
+  const signIn='/auth/sign-in?'+new URLSearchParams({return_to:workspaceInvitationPath(id)});
   return <main className="portable-contacts">
     <header><span>⚓ Harbor</span>{/* The portable renderer uses full document navigation. */}
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
@@ -396,8 +401,8 @@ export function PortableInvitationPage({id,email,review}:{id:string;email:string
       </>:<>
         <p>Invitation unavailable. In Workspaces, check for a replacement invitation or open a workspace you’ve joined.</p>
         <p><Link href="/?view=workspaces">Open my workspaces</Link></p>
-        <p>Use the Google account that received the link, or ask the workspace owner for a current one.</p>
-        <a href={signIn}>Use another Google account</a>
+        <p>Use the account approved for the invited address, or ask the workspace owner for a current one.</p>
+        <a href={signIn}>Use another account</a>
       </>}
       {error&&<p role="alert">{error}</p>}
     </section>

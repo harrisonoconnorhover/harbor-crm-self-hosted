@@ -1,7 +1,8 @@
 import {env} from 'cloudflare:workers';
 import {redirect} from 'next/navigation';
 import {Anchor,ArrowRight,Check,LockKeyhole} from 'lucide-react';
-import {authMode,googleLoginCallbackPath,googleLoginSetupIssues,loginConfig,loginOrigin,safeReturnPath} from '@/lib/identity';
+import {authMode,googleLoginCallbackPath,googleLoginSetupIssues,loginOrigin,safeReturnPath} from '@/lib/identity';
+import {loginPageOptions} from '@/lib/login-page-options';
 import {readPublicPilotContact} from '@/lib/public-pilot-contact.mjs';
 import {portableTrial} from '@/lib/trial-platform';
 import '../auth.css';
@@ -10,18 +11,19 @@ export const dynamic='force-dynamic';
 const signInSettings={
   HARBOR_LOGIN_GOOGLE_CLIENT_ID:'Paste the Google web client ID without spaces or line breaks.',
   HARBOR_LOGIN_GOOGLE_CLIENT_SECRET:'Paste the secret for the same Google web client without spaces or line breaks.',
-  HARBOR_LOGIN_ALLOWED_EMAILS:'The approved Google email addresses, separated by commas. Enter each address in full.',
+  HARBOR_LOGIN_ALLOWED_EMAILS:'The approved workspace owners’ email addresses, separated by commas. Enter each address in full.',
 };
 export default async function SignIn({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
   const params=await searchParams,returnTo=safeReturnPath(params.return_to);
   if(authMode(env)==='sites')redirect('/signin-with-chatgpt?return_to='+encodeURIComponent(returnTo));
   const support=portableTrial?readPublicPilotContact(env.HARBOR_PUBLIC_PILOT_CONTACT):null;
-  const reference=portableTrial&&params.error==='sign_in_failed'&&typeof params.reference==='string'
+  const reference=portableTrial&&(params.error==='sign_in_failed'||params.error==='account_conflict')&&typeof params.reference==='string'
     &&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(params.reference)
     ?params.reference:null;
-  let configured=true,setupCallback:string|undefined;
-  try{loginConfig(env)}catch{
-    configured=false;
+  const {googleReady,microsoftReady,showGoogleSetup,showMicrosoftSetup,microsoftCallback}=loginPageOptions(env);
+  const chooseAccount=googleReady&&microsoftReady?'Google or Microsoft account':microsoftReady||showMicrosoftSetup?'Microsoft account':'Google account';
+  let setupCallback:string|undefined;
+  if(showGoogleSetup){
     try{setupCallback=loginOrigin(env).origin+googleLoginCallbackPath;}catch{/* No callback to show until the origin is valid. */}
   }
   const setupIssues=portableTrial&&setupCallback?googleLoginSetupIssues(env):null;
@@ -46,11 +48,22 @@ export default async function SignIn({searchParams}:{searchParams:Promise<Record
       <section className="auth-card welcome-signin" id="sign-in" aria-labelledby="signin-title">
         <span className="welcome-card-icon" aria-hidden="true"><Anchor size={24}/></span>
         <h2 id="signin-title">Sign in to Harbor</h2>
-        <p className="welcome-card-description">Use your Google account to continue.</p>
-        {params.error&&<p role="alert">Sign-in could not be completed. Please start again and choose your Google account.</p>}
+        <p className="welcome-card-description">Use your {chooseAccount} to continue.</p>
+        {params.error==='account_conflict'?<p role="alert">This Harbor address already belongs to a different sign-in. Use your original account or ask your administrator to check the Microsoft account binding.</p>:
+          params.error&&<p role="alert">Sign-in could not be completed. Please start again and choose your {chooseAccount}.</p>}
         {reference&&<p className="auth-note welcome-support">If you contact support, share this reference <code>{reference}</code>.</p>}
         {params.signed_out&&<p role="status">You’re signed out of Harbor.</p>}
-        {configured?<a className="auth-primary welcome-google" href={'/auth/google/start?return_to='+encodeURIComponent(returnTo)} target="_top"><span>Continue with Google</span><ArrowRight size={18} aria-hidden="true"/></a>:<p role="alert">Google sign-in needs configuration. Contact the workspace administrator.</p>}
+        {googleReady&&<a className="auth-primary welcome-google" href={'/auth/google/start?return_to='+encodeURIComponent(returnTo)} target="_top"><span>Continue with Google</span><ArrowRight size={18} aria-hidden="true"/></a>}
+        {microsoftReady&&<a className="auth-primary welcome-google" href={'/auth/microsoft/start?return_to='+encodeURIComponent(returnTo)} target="_top"><span>Continue with Microsoft</span><ArrowRight size={18} aria-hidden="true"/></a>}
+        {!googleReady&&!microsoftReady&&<p role="alert">{showMicrosoftSetup?'Microsoft sign-in needs configuration. Contact the workspace administrator.':'Google sign-in needs configuration. Contact the workspace administrator.'}</p>}
+        {showMicrosoftSetup&&<details className="welcome-setup">
+          <summary>Setting up Microsoft sign-in?</summary>
+          <ol>
+            <li>In Microsoft Entra, register a Web application for Harbor sign-in.{microsoftCallback&&<> Add this redirect URI <code>{microsoftCallback}</code></>}</li>
+            <li>Set <code>HARBOR_LOGIN_MICROSOFT_TENANT_ID</code>, <code>HARBOR_LOGIN_MICROSOFT_CLIENT_ID</code> and <code>HARBOR_LOGIN_MICROSOFT_CLIENT_SECRET</code> in this app’s private environment.</li>
+            <li>In <code>HARBOR_LOGIN_MICROSOFT_BINDINGS</code>, map each approved directory object ID to its Harbor email. Set <code>HARBOR_LOGIN_ALLOWED_EMAILS</code> for the people who can own workspaces.</li>
+          </ol>
+        </details>}
         {setupCallback&&<details className="welcome-setup">
           <summary>Setting up this installation?</summary>
           <ol>
@@ -65,8 +78,8 @@ export default async function SignIn({searchParams}:{searchParams:Promise<Record
             <li>Apply the settings and reload this page. When the Google sign-in button appears, sign in with an approved account.</li>
           </ol>
         </details>}
-        <p className="auth-note welcome-permissions"><LockKeyhole size={16} aria-hidden="true"/><span>Sign-in shares your name and email address with Harbor. It does not connect Gmail or Calendar.</span></p>
-        <p className="auth-note welcome-invite">Joining a shared workspace? Use the Google account that received the invitation.</p>
+        <p className="auth-note welcome-permissions"><LockKeyhole size={16} aria-hidden="true"/><span>{microsoftReady?'Harbor uses your sign-in to identify you. Mail and calendar connections are separate.':'Sign-in shares your name and email address with Harbor. It does not connect Gmail or Calendar.'}</span></p>
+        <p className="auth-note welcome-invite">Joining a shared workspace? Use the account your administrator approved for the invited address.</p>
         {portableTrial&&<p className="auth-note welcome-support">
           {support?<>Need help signing in? <a href={'mailto:'+support.email}>Contact {support.name}</a>.</>:
             'Need help signing in? Contact the person who invited you.'}
