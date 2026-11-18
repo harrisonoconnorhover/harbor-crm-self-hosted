@@ -1,0 +1,2 @@
+ALTER TABLE "portable_segment_workflow_scans" ADD COLUMN "cycle_due_at" bigint;--> statement-breakpoint
+CREATE INDEX "portable_segment_scans_cycle_due" ON "portable_segment_workflow_scans" USING btree ("cycle_due_at") WHERE "portable_segment_workflow_scans"."cycle_due_at" IS NOT NULL;

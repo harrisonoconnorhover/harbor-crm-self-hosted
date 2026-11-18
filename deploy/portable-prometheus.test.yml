@@ -1,0 +1,542 @@
+rule_files:
+  - portable-prometheus.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: Missed reports are isolated by collector and resolve when it recovers
+    interval: 1m
+    input_series:
+      - series: 'up{job="harbor-monitor",instance="healthy:9100"}'
+        values: '1 1 1 1 1 1'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="healthy:9100"}'
+        values: '0 60 120 180 240 300'
+      - series: 'up{job="harbor-monitor",instance="pilot:9100"}'
+        values: '1 1 1 1 1 1'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '_ 60 60 60 60 300'
+      - series: 'up{job="harbor-monitor",instance="recovery:9100"}'
+        values: '1 0 1 1 1 1'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="recovery:9100"}'
+        values: '0 stale 120 180 240 300'
+    alert_rule_test:
+      - alertname: HarborMonitorMissed
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100'}
+            exp_annotations: {summary: Harbor has no recent monitoring result}
+      - alertname: HarborMonitorMissed
+        eval_time: 1m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'recovery:9100'}
+            exp_annotations: {summary: Harbor has no recent monitoring result}
+      - alertname: HarborMonitorMissed
+        eval_time: 4m
+        exp_alerts: []
+      - alertname: HarborMonitorMissed
+        eval_time: 5m
+        exp_alerts: []
+  - name: A stale report alerts even while its collector remains healthy
+    interval: 1m
+    input_series:
+      - series: 'up{job="harbor-monitor",instance="pilot:9100"}'
+        values: '1+0x4'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0+0x4'
+    alert_rule_test:
+      - alertname: HarborMonitorMissed
+        eval_time: 4m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100'}
+            exp_annotations: {summary: Harbor has no recent monitoring result}
+  - name: Freshness tolerates 30 seconds of clock skew and three minutes of age
+    interval: 1m
+    input_series:
+      - series: 'up{job="harbor-monitor",instance="pilot:9100"}'
+        values: '1+0x5'
+      - series: 'up{job="harbor-monitor",instance="healthy:9100"}'
+        values: '1+0x5'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '3600 90 151 0 59 300'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="healthy:9100"}'
+        values: '0+60x5'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="worker",status="attention"}'
+        values: '1 1 1 1 1 0'
+    alert_rule_test:
+      - alertname: HarborMonitorMissed
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100'}
+            exp_annotations: {summary: Harbor has no recent monitoring result}
+      - alertname: HarborMonitorMissed
+        eval_time: 1m
+        exp_alerts: []
+      - alertname: HarborMonitorMissed
+        eval_time: 2m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100'}
+            exp_annotations: {summary: Harbor has no recent monitoring result}
+      - alertname: HarborMonitorMissed
+        eval_time: 3m
+        exp_alerts: []
+      - alertname: HarborMonitorMissed
+        eval_time: 4m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100'}
+            exp_annotations: {summary: Harbor has no recent monitoring result}
+      - alertname: HarborMonitorMissed
+        eval_time: 5m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 0m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 1m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', section: worker}
+            exp_annotations: {summary: Harbor worker needs attention}
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 2m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 3m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', section: worker}
+            exp_annotations: {summary: Harbor worker needs attention}
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 4m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 5m
+        exp_alerts: []
+  - name: Missing collector configuration still alerts
+    interval: 1m
+    alert_rule_test:
+      - alertname: HarborMonitorMissed
+        eval_time: 1m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor}
+            exp_annotations: {summary: Harbor has no recent monitoring result}
+  - name: A specific backup alert replaces the generic warning and resolves after repair
+    interval: 1m
+    input_series:
+      - series: 'up{job="harbor-monitor",instance="pilot:9100"}'
+        values: '1+0x3'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0+60x3'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="backups",status="attention"}'
+        values: '1 1 0 0 1'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="backups",status="unavailable"}'
+        values: '0 0 0 1'
+      - series: 'harbor_monitor_backup_issue{job="harbor-monitor",instance="pilot:9100",issue="integrity_failed"}'
+        values: '1 stale _ _'
+      - series: 'harbor_monitor_backup_issue{job="harbor-monitor",instance="pilot:9100",issue="incompatible_migrations"}'
+        values: '0 1 stale _'
+      - series: 'harbor_monitor_backup_issue{job="harbor-monitor",instance="pilot:9100",issue="backup_service_not_reporting"}'
+        values: '0 0 0 0 1 stale'
+      - series: 'harbor_monitor_backup_issue{job="harbor-monitor",instance="pilot:9100",issue="backup_service_poll_failed"}'
+        values: '0 0 0 0 0 1 stale'
+    alert_rule_test:
+      - alertname: HarborMonitorBackupIssue
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', issue: integrity_failed}
+            exp_annotations:
+              summary: Harbor backup needs attention
+              description: Verify the last good backup before retrying the capture.
+      - alertname: HarborMonitorBackupIssue
+        eval_time: 1m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', issue: incompatible_migrations}
+            exp_annotations:
+              summary: Harbor backup needs attention
+              description: Verify the dated bundle with a matching Harbor release before restoring.
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 1m
+        exp_alerts: []
+      - alertname: HarborMonitorBackupIssue
+        eval_time: 2m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 3m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', section: backups}
+            exp_annotations: {summary: Harbor backups needs attention}
+      - alertname: HarborMonitorBackupIssue
+        eval_time: 4m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', issue: backup_service_not_reporting}
+            exp_annotations:
+              summary: Harbor backup needs attention
+              description: Check that the backup service is running and can write to the backup volume.
+      - alertname: HarborMonitorBackupIssue
+        eval_time: 5m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', issue: backup_service_poll_failed}
+            exp_annotations:
+              summary: Harbor backup needs attention
+              description: Check the backup service logs and confirm the next poll succeeds.
+      - alertname: HarborMonitorBackupIssue
+        eval_time: 6m
+        exp_alerts: []
+  - name: Review alerts link to specific decisions and retain legacy fallback
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="legacy:9100"}'
+        values: '0 60 120'
+      - series: 'harbor_monitor_worker_issue{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test",issue="needs_review"}'
+        values: '1 1 0'
+      - series: 'harbor_monitor_worker_issue{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test",issue="failed"}'
+        values: '1 0 0'
+      - series: 'harbor_monitor_worker_issue{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test",issue="uncertain"}'
+        values: '1 0 0'
+      - series: 'harbor_monitor_worker_issue{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test",issue="suppressed_email"}'
+        values: '0 1 0'
+      - series: 'harbor_monitor_worker_issue{job="harbor-monitor",instance="legacy:9100",harbor_origin="https://legacy.example.test",issue="needs_review"}'
+        values: '1 0 0'
+    alert_rule_test:
+      - alertname: HarborMonitorWorkerIssue
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'legacy:9100', harbor_origin: 'https://legacy.example.test', issue: needs_review}
+            exp_annotations:
+              summary: 'Harbor worker issue: needs_review'
+              description: ''
+              queue_url: 'https://legacy.example.test/?view=job-queue&queue=issues&jobIssue=needs_review'
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test', issue: failed}
+            exp_annotations:
+              summary: Harbor jobs failed and need review
+              description: Open the queue and inspect the job attempts before choosing a next step.
+              queue_url: 'https://pilot.example.test/?view=job-queue&queue=issues&jobIssue=failed'
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test', issue: uncertain}
+            exp_annotations:
+              summary: Harbor jobs have unconfirmed outcomes
+              description: Check the destination for the original action and reconcile the saved receipt.
+              queue_url: 'https://pilot.example.test/?view=job-queue&queue=issues&jobIssue=uncertain'
+      - alertname: HarborMonitorWorkerIssue
+        eval_time: 1m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test', issue: suppressed_email}
+            exp_annotations:
+              summary: Harbor skipped email for recipients on the do-not-email list
+              description: Review the recorded suppression in the queue.
+              queue_url: 'https://pilot.example.test/?view=job-queue&queue=issues&jobIssue=suppressed_email'
+      - alertname: HarborMonitorWorkerIssue
+        eval_time: 2m
+        exp_alerts: []
+  - name: Stalled job polling alerts and clears when it resumes
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="worker",status="attention"}'
+        values: '0 1 0'
+      - series: 'harbor_monitor_worker_issue{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test",issue="poll_stalled"}'
+        values: '0 1 0'
+    alert_rule_test:
+      - alertname: HarborMonitorWorkerIssue
+        eval_time: 0m
+        exp_alerts: []
+      - alertname: HarborMonitorWorkerIssue
+        eval_time: 1m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test', issue: poll_stalled}
+            exp_annotations:
+              summary: Harbor worker job polling has stalled
+              description: The worker heartbeat is current. Check worker logs for job poll errors or blocked database queries, then review the queue.
+              queue_url: 'https://pilot.example.test/?view=job-queue&queue=issues'
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 1m
+        exp_alerts: []
+      - alertname: HarborMonitorWorkerIssue
+        eval_time: 2m
+        exp_alerts: []
+  - name: Gmail reconnect and missing worker alert independently
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120 180 240 240 240 240 240'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="gmailQueue",status="attention"}'
+        values: '1 0 0 1 0 1 1 1 1'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="gmailQueue",status="unavailable"}'
+        values: '0 0 1 0 0 0 0 0 0'
+      - series: 'harbor_monitor_gmail_reconnect_required{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test"}'
+        values: '1 0 stale 1 0 0 0 0 0'
+      - series: 'harbor_monitor_gmail_worker_missing{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test"}'
+        values: '0 0 stale 1 0 1 1 1 1'
+    alert_rule_test:
+      - alertname: HarborScheduledGmailReconnect
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test'}
+            exp_annotations:
+              summary: Harbor scheduled Gmail needs a reconnect
+              description: Reconnect the scheduled Gmail mailbox, verify the connection, and review the failed email before scheduling a new send.
+              queue_url: 'https://pilot.example.test/?view=job-queue&queue=issues&jobKind=gmail&jobIssue=failed'
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 0m
+        exp_alerts: []
+      - alertname: HarborScheduledGmailReconnect
+        eval_time: 1m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 2m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', section: gmailQueue}
+            exp_annotations: {summary: Harbor gmailQueue needs attention}
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 3m
+        exp_alerts: []
+      - alertname: HarborScheduledGmailReconnect
+        eval_time: 3m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test'}
+            exp_annotations:
+              summary: Harbor scheduled Gmail needs a reconnect
+              description: Reconnect the scheduled Gmail mailbox, verify the connection, and review the failed email before scheduling a new send.
+              queue_url: 'https://pilot.example.test/?view=job-queue&queue=issues&jobKind=gmail&jobIssue=failed'
+      - alertname: HarborScheduledGmailWorkerMissing
+        eval_time: 3m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test'}
+            exp_annotations:
+              summary: Harbor scheduled Gmail has no recent worker poll
+              description: Check the Gmail worker startup mode and run doctor worker --check-gmail. Review pending email and its send window before restarting the worker.
+              queue_url: 'https://pilot.example.test/?view=job-queue&queue=pending&jobKind=gmail'
+      - alertname: HarborScheduledGmailWorkerMissing
+        eval_time: 4m
+        exp_alerts: []
+      - alertname: HarborScheduledGmailWorkerMissing
+        eval_time: 8m
+        exp_alerts: []
+  - name: Overdue segment scan alerts while the worker is healthy and clears on recovery
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120 180'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="worker",status="ok"}'
+        values: '1 1 1 1'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="segments",status="attention"}'
+        values: '1 0 0 1'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="segments",status="unavailable"}'
+        values: '0 0 1 0'
+      - series: 'harbor_monitor_segment_scan_overdue{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.example.test"}'
+        values: '1 0 stale 1'
+    alert_rule_test:
+      - alertname: HarborSegmentScanOverdue
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test'}
+            exp_annotations:
+              summary: Harbor segment workflow checks are overdue
+              description: Open Workflows to check for retries or a full job queue. Confirm a worker is running with segment scanning enabled.
+              workflows_url: 'https://pilot.example.test/?view=workflows'
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 0m
+        exp_alerts: []
+      - alertname: HarborSegmentScanOverdue
+        eval_time: 1m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 2m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', section: segments}
+            exp_annotations: {summary: Harbor segments needs attention}
+      - alertname: HarborSegmentScanOverdue
+        eval_time: 7m
+        exp_alerts: []
+  - name: Web release mismatch replaces the generic alert and resolves on recovery
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="web",status="attention"}'
+        values: '1 0'
+      - series: 'harbor_monitor_web_issue{job="harbor-monitor",instance="pilot:9100",issue="build_mismatch"}'
+        values: '1 stale'
+    alert_rule_test:
+      - alertname: HarborMonitorWebIssue
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', issue: build_mismatch}
+            exp_annotations:
+              summary: Harbor web readiness check failed
+              description: Compare the serving build with the expected release and check traffic routing.
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 0m
+        exp_alerts: []
+      - alertname: HarborMonitorWebIssue
+        eval_time: 1m
+        exp_alerts: []
+
+  - name: Due Tasks alert with a queue link, clear on recovery, and fall back if the check fails
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120 180'
+      - series: 'harbor_monitor_task_worker_missing{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.harbor.test"}'
+        values: '0 1 0 stale'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.harbor.test",section="taskQueue",status="attention"}'
+        values: '0 1 0 0'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.harbor.test",section="taskQueue",status="unavailable"}'
+        values: '0 0 0 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HarborScheduledTaskWorkerMissing
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.harbor.test'}
+            exp_annotations:
+              summary: Harbor scheduled Tasks are waiting for a full worker
+              description: Check the worker service and its startup mode, then review the pending Tasks in Harbor.
+              queue_url: 'https://pilot.harbor.test/?view=job-queue&queue=pending&jobKind=task'
+      - eval_time: 1m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: HarborScheduledTaskWorkerMissing
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.harbor.test', section: taskQueue}
+            exp_annotations: {summary: Harbor taskQueue needs attention}
+
+  - name: Inquiry follow-up alerts link to the inbox and clear when handled
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120 180'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.harbor.test",section="inquiryFollowUp",status="attention"}'
+        values: '0 1 0 0'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.harbor.test",section="inquiryFollowUp",status="unavailable"}'
+        values: '0 0 0 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HarborInquiryFollowUpOverdue
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.harbor.test'}
+            exp_annotations:
+              summary: Harbor has website inquiries overdue for follow-up
+              description: Review inquiries that have been open for at least 24 hours.
+              inquiries_url: 'https://pilot.harbor.test/?view=forms&inquiries=workspace&filter=overdue'
+      - eval_time: 1m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: HarborInquiryFollowUpOverdue
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.harbor.test', section: inquiryFollowUp}
+            exp_annotations: {summary: Harbor inquiryFollowUp needs attention}
+
+  - name: Skipped workflow alert links to missed runs and clears after review
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120 180'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.harbor.test",section="workflowCapacity",status="attention"}'
+        values: '0 1 0 0'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",harbor_origin="https://pilot.harbor.test",section="workflowCapacity",status="unavailable"}'
+        values: '0 0 0 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HarborWorkflowCapacitySkipped
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.harbor.test'}
+            exp_annotations:
+              summary: Harbor has workflow runs skipped by a full queue
+              description: Open the missed runs, follow up on the source records, and mark the runs reviewed.
+              workflows_url: 'https://pilot.harbor.test/?view=workflows&runIssue=queue_full#recent-runs'
+      - eval_time: 1m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: HarborWorkflowCapacitySkipped
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.harbor.test', section: workflowCapacity}
+            exp_annotations: {summary: Harbor workflowCapacity needs attention}
+
+  - name: Calendar review alert links to receipts and resolves
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 60 120 180'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="calendar",status="attention",harbor_origin="https://pilot.example.test"}'
+        values: '1 1 0 0'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="calendar",status="unavailable",harbor_origin="https://pilot.example.test"}'
+        values: '0 0 0 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HarborCalendarReceiptNeedsReview
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', harbor_origin: 'https://pilot.example.test'}
+            exp_annotations:
+              summary: Harbor Calendar has changes to review
+              description: Open Calendar and use Check invitation, Check reschedule, or Check cancellation on the original receipt before repeating a change.
+              calendar_url: 'https://pilot.example.test/?view=calendar&filter=needs_review'
+      - eval_time: 1m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: HarborCalendarReceiptNeedsReview
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HarborMonitorSectionUnhealthy
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', section: calendar, harbor_origin: 'https://pilot.example.test'}
+            exp_annotations: {summary: Harbor calendar needs attention}
+  - name: Full worker expectation alerts only on valid opted-in reports and recovers on a full poll
+    interval: 1m
+    input_series:
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="pilot:9100"}'
+        values: '0 300 120 180'
+      - series: 'harbor_monitor_checked_at_seconds{job="harbor-monitor",instance="notes-only:9100"}'
+        values: '0+60x3'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="worker",status="ok"}'
+        values: '1+0x3'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="notes-only:9100",section="worker",status="ok"}'
+        values: '1+0x3'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="fullWorker",status="attention"}'
+        values: '1 1 0 0'
+      - series: 'harbor_monitor_section_status{job="harbor-monitor",instance="pilot:9100",section="fullWorker",status="unavailable"}'
+        values: '0 0 1 0'
+      - series: 'harbor_monitor_full_worker_missing{job="harbor-monitor",instance="pilot:9100"}'
+        values: '1 1 stale 0'
+    alert_rule_test:
+      - alertname: HarborFullWorkerMissing
+        eval_time: 0m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100'}
+            exp_annotations:
+              summary: Harbor has no recent full worker poll
+              description: Check the worker service startup mode and confirm a full worker is running.
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 0m
+        exp_alerts: []
+      - alertname: HarborFullWorkerMissing
+        eval_time: 1m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 1m
+        exp_alerts: []
+      - alertname: HarborFullWorkerMissing
+        eval_time: 2m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 2m
+        exp_alerts:
+          - exp_labels: {job: harbor-monitor, instance: 'pilot:9100', section: fullWorker}
+            exp_annotations: {summary: Harbor fullWorker needs attention}
+      - alertname: HarborFullWorkerMissing
+        eval_time: 3m
+        exp_alerts: []
+      - alertname: HarborMonitorSectionUnhealthy
+        eval_time: 3m
+        exp_alerts: []

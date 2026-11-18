@@ -1,0 +1,1 @@
+ALTER TABLE "deal_pipeline_stages" ADD COLUMN "required_properties" jsonb DEFAULT '[]'::jsonb NOT NULL;

@@ -1,0 +1,2 @@
+CREATE INDEX "portable_jobs_due_status" ON "portable_jobs" USING btree ("available_at") WHERE "portable_jobs"."status"='queued';--> statement-breakpoint
+CREATE INDEX "portable_jobs_attention_status" ON "portable_jobs" USING btree ("status","finished_at") WHERE "portable_jobs"."status" IN ('attention','failed');

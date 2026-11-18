@@ -1,0 +1,4 @@
+ALTER TABLE "portable_jobs" ADD COLUMN "operator_reviewed_at" bigint;--> statement-breakpoint
+ALTER TABLE "portable_jobs" ADD COLUMN "operator_reviewed_by" text;--> statement-breakpoint
+ALTER TABLE "portable_jobs" ADD CONSTRAINT "portable_jobs_operator_reviewed_by_login_identities_id_fk" FOREIGN KEY ("operator_reviewed_by") REFERENCES "public"."login_identities"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "portable_jobs_unreviewed" ON "portable_jobs" USING btree ("id") WHERE "portable_jobs"."status"='attention' AND "portable_jobs"."operator_reviewed_at" IS NULL;

@@ -1,0 +1,2 @@
+CREATE INDEX "portable_task_repeat_due" ON "portable_tasks" USING btree (("data"->>'repeatDueAt'),"workspace_id","id") WHERE
+  "portable_tasks"."completed_at" IS NULL AND jsonb_typeof("portable_tasks"."data"->'repeat') = 'object' AND ("portable_tasks"."data"->>'repeatDueAt') IS NOT NULL;

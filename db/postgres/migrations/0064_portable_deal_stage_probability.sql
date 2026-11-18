@@ -1,0 +1,1 @@
+ALTER TABLE "deal_pipeline_stages" ADD COLUMN "probability" integer;

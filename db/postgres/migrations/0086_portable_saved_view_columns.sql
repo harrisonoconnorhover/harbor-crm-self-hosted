@@ -1,0 +1,1 @@
+ALTER TABLE "portable_saved_views" ADD COLUMN "columns" jsonb;

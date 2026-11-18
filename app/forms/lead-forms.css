@@ -1,0 +1,13 @@
+.lead-form-page{min-height:100dvh;background:#f4f8f7;padding:48px 20px;display:grid;place-items:center;color:#193e42}
+.lead-form-card{background:#fff;border:1px solid #dbe5e6;border-radius:15px;width:100%;max-width:560px;padding:35px;box-shadow:0 10px 36px #193e4208}
+.lead-form-brand{display:block;color:#00636a;font-size:24px;font-weight:700;margin-bottom:25px}
+.lead-form-card h1{font-size:29px;line-height:1.2;margin:0 0 16px}.lead-form-card p{line-height:1.6;margin:15px 0}
+.lead-form-card fieldset{border:0;padding:0;margin:24px 0 10px;display:grid;gap:15px;min-width:0}
+.lead-form-card label{display:grid;gap:7px;font-size:14px;font-weight:600}.lead-form-card label span{font-weight:400;color:#637c80}
+.lead-form-card input,.lead-form-card textarea{border:1px solid #c7d7da;border-radius:6px;background:#fff;color:#193e42;padding:11px 12px;width:100%;font:inherit;box-sizing:border-box}.lead-form-card textarea{resize:vertical}
+.lead-form-card button{width:100%;background:#00636a;color:#fff;font:inherit;font-weight:600;padding:13px;border:0;border-radius:7px;cursor:pointer}.lead-form-card button:disabled{opacity:.6;cursor:default}
+.lead-form-card :focus-visible{outline:3px solid #64b6c5;outline-offset:3px}.lead-form-card a{color:#00636a}
+.lead-form-card .lead-form-trap{display:none}.lead-form-detail{font-size:13px;color:#526d73}.lead-form-preview{color:#71613a;background:#faf6e8;padding:10px;border-radius:5px;font-size:13px}
+.lead-form-success{background:#eff9f3;border:1px solid #98c8b2;border-radius:6px;padding:16px}.lead-form-card [role=alert]{color:#a62f12}
+.lead-forms-manager .lead-form-page{min-height:0;padding:20px}.lead-form-submission{padding:15px 0;border-top:1px solid #dbe5e6}.lead-form-submission pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+@media(max-width:420px){.lead-form-card{padding:25px 20px}.lead-form-card h1{font-size:25px}.lead-form-page{padding:25px 15px}}

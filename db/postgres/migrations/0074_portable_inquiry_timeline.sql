@@ -1,0 +1,2 @@
+ALTER TABLE "portable_lead_inquiries" ADD COLUMN "timeline_note_id" uuid;--> statement-breakpoint
+CREATE INDEX "portable_lead_inquiries_contact_timeline" ON "portable_lead_inquiries" USING btree ("workspace_id","contact_id","received_at","timeline_note_id") WHERE "portable_lead_inquiries"."timeline_note_id" IS NOT NULL;

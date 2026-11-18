@@ -1,0 +1,4 @@
+ALTER TABLE "portable_calendar_meetings" DROP CONSTRAINT "portable_calendar_meeting_status";--> statement-breakpoint
+DROP INDEX "portable_calendar_meeting_overlap";--> statement-breakpoint
+CREATE INDEX "portable_calendar_meeting_overlap" ON "portable_calendar_meetings" USING btree ("workspace_id","end_at") WHERE "portable_calendar_meetings"."status" NOT IN ('cancelled','rejected');--> statement-breakpoint
+ALTER TABLE "portable_calendar_meetings" ADD CONSTRAINT "portable_calendar_meeting_status" CHECK ("portable_calendar_meetings"."status" IN ('submitting','attention','scheduled','cancelling','cancel_attention','cancelled','rejected'));

@@ -1,0 +1,2 @@
+ALTER TABLE "private_workspaces" ADD COLUMN "last_form_note_promotion_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "private_workspace_form_note_order" ON "private_workspaces" USING btree ("last_form_note_promotion_at" NULLS FIRST,"id");

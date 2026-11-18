@@ -1,0 +1,10 @@
+import {z} from 'zod';
+const id=z.string().min(1).max(100);
+export const capacityStatus=z.object({pipelineId:id,statusId:id}).strict();
+export type CapacityStatus=z.infer<typeof capacityStatus>;
+export const capacityAgeRule=z.object({basis:z.enum(['created','assigned']),days:z.number().int().min(1).max(36500)}).strict();
+export type CapacityAgeRule=z.infer<typeof capacityAgeRule>;
+export const capacityExclusionsQuery=z.object({workspaceId:z.string().min(1).max(200)}).strict();
+export const capacityExclusionsInput=capacityExclusionsQuery.extend({revision:z.number().int().nonnegative(),pipelineRevision:z.number().int().nonnegative(),statuses:z.array(capacityStatus).max(1000).refine(v=>new Set(v.map(s=>JSON.stringify([s.pipelineId,s.statusId]))).size===v.length,'Choose each status once.'),ageRule:capacityAgeRule.nullable().optional()}).strict();
+export const canonicalCapacityStatuses=(statuses:CapacityStatus[])=>[...statuses].sort((a,b)=>a.pipelineId.localeCompare(b.pipelineId)||a.statusId.localeCompare(b.statusId));
+export type CapacityExclusionsState={workspaceId:string;canEdit:boolean;revision:number;pipelineRevision:number;statuses:CapacityStatus[];ageRule:CapacityAgeRule|null;pipelines:{id:string;name:string;statuses:{id:string;label:string}[]}[]};

@@ -1,0 +1,3 @@
+ALTER TABLE "portable_saved_views" ADD COLUMN "author_id" text;--> statement-breakpoint
+ALTER TABLE "portable_saved_views" ADD CONSTRAINT "portable_saved_views_author_id_login_identities_id_fk" FOREIGN KEY ("author_id") REFERENCES "public"."login_identities"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portable_saved_views" ADD CONSTRAINT "portable_saved_view_author_shared" CHECK ("portable_saved_views"."author_id" IS NULL OR "portable_saved_views"."shared");

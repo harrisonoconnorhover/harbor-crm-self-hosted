@@ -1,0 +1,63 @@
+{
+  "name": "harbor-crm-portable",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build:portable": "node scripts/build-portable.mjs",
+    "test:portable": "npm run build:portable && node tests/portable-fixtures/run.mjs",
+    "doctor:portable": "node scripts/portable-web.mjs doctor",
+    "start:portable": "node scripts/portable-web.mjs start",
+    "worker:portable": "node scripts/portable-web.mjs worker",
+    "worker:status:portable": "node scripts/portable-web.mjs worker-status",
+    "monitor:portable": "node scripts/portable-web.mjs monitor-status",
+    "backup:portable": "node scripts/portable-web.mjs backup",
+    "backup:service:portable": "node scripts/portable-web.mjs backup-service",
+    "backup:tick:portable": "node scripts/portable-web.mjs backup-tick",
+    "backup:status:portable": "node scripts/portable-web.mjs backup-status",
+    "restore:portable": "node scripts/portable-web.mjs restore",
+    "db:migrate:portable": "node scripts/portable-web.mjs migrate",
+    "typecheck": "tsc --noEmit",
+    "install:ci": "npm ci --include=dev --include=optional"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1164.0",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "drizzle-orm": "0.45.2",
+    "htmlparser2": "12.0.0",
+    "jose": "6.2.14",
+    "lucide-react": "^1.31.0",
+    "pdfjs-dist": "6.4.299",
+    "postgres": "3.4.8",
+    "quickjs-emscripten-core": "0.32.0",
+    "re2js": "2.9.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260515.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.39",
+    "drizzle-kit": "0.31.10",
+    "next": "16.4.6",
+    "react-server-dom-webpack": "19.3.1",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "1.0.0-beta.5",
+    "vite": "8.1.6"
+  },
+  "type": "module",
+  "overrides": {
+    "vinext@1.0.0-beta.5": {
+      "image-size": "2.0.3"
+    }
+  },
+  "license": "MIT"
+}

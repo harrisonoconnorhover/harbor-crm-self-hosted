@@ -1,0 +1,1 @@
+ALTER TABLE "portable_saved_views" ADD COLUMN "shared" boolean DEFAULT false NOT NULL;

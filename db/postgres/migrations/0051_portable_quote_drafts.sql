@@ -1,0 +1,28 @@
+CREATE TABLE "portable_quote_events" (
+	"workspace_id" uuid NOT NULL,
+	"quote_id" uuid NOT NULL,
+	"revision" integer NOT NULL,
+	"actor_id" text NOT NULL,
+	"action" text NOT NULL,
+	"occurred_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "portable_quote_events_workspace_id_quote_id_revision_pk" PRIMARY KEY("workspace_id","quote_id","revision")
+);
+--> statement-breakpoint
+CREATE TABLE "portable_quotes" (
+	"workspace_id" uuid NOT NULL,
+	"id" uuid NOT NULL,
+	"deal_id" uuid NOT NULL,
+	"deal_created_at" timestamp with time zone NOT NULL,
+	"deal_name" text NOT NULL,
+	"revision" integer NOT NULL,
+	"creation_key" text NOT NULL,
+	"data" jsonb NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "portable_quotes_workspace_id_id_pk" PRIMARY KEY("workspace_id","id")
+);
+--> statement-breakpoint
+ALTER TABLE "portable_quote_events" ADD CONSTRAINT "portable_quote_events_actor_id_login_identities_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."login_identities"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portable_quote_events" ADD CONSTRAINT "portable_quote_events_workspace_id_quote_id_portable_quotes_workspace_id_id_fk" FOREIGN KEY ("workspace_id","quote_id") REFERENCES "public"."portable_quotes"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portable_quotes" ADD CONSTRAINT "portable_quotes_workspace_id_deal_id_deals_workspace_id_id_fk" FOREIGN KEY ("workspace_id","deal_id") REFERENCES "public"."deals"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "portable_quotes_deal_id" ON "portable_quotes" USING btree ("workspace_id","deal_id","id");

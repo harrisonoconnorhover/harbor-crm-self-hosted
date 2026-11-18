@@ -1,0 +1,1 @@
+ALTER TABLE "portable_workspace_viewers" ADD COLUMN "contact_outreach" boolean DEFAULT false NOT NULL;

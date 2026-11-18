@@ -1,0 +1,1 @@
+ALTER TABLE "portable_guest_booking_requests" ADD COLUMN "status_receipt" text;

@@ -1,0 +1,1 @@
+ALTER TABLE "portable_invoices" ADD COLUMN "void_reason" text;

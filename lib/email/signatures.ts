@@ -1,0 +1,10 @@
+import {z} from 'zod';
+import {signatureInput} from './templates';
+export const signatureId=z.string().min(1).max(300);
+export const namedSignatureInput=z.object({id:signatureId,revision:z.number().int().nonnegative(),name:z.string().trim().min(1).max(120),signature:z.string().max(4000),signatureHtml:z.string().max(16000).optional()}).strict().refine(v=>v.revision!==0||z.string().guid("Invalid uuid").safeParse(v.id).success,'Use a new UUID for a new signature.').transform((v,c)=>{const parsed=signatureInput.safeParse({revision:v.revision,automatic:false,signature:v.signature,signatureHtml:v.signatureHtml});if(!parsed.success){for(const issue of parsed.error.issues)c.addIssue({...issue});return z.NEVER;}return {...v,signature:parsed.data.signature,signatureHtml:parsed.data.signatureHtml||''};});
+export type NamedSignature=z.infer<typeof namedSignatureInput>&{createdAt:string;updatedAt:string};
+export type SignatureSummary=Omit<NamedSignature,'signature'|'signatureHtml'>;
+export type SignatureDefaults={defaultId:string;automatic:boolean;revision:number;defaultName:string};
+export const signatureDefaultsInput=z.object({defaultId:z.string().max(300),automatic:z.boolean(),revision:z.number().int().nonnegative()}).strict().refine(v=>!v.automatic||!!v.defaultId,'Choose a signature before enabling automatic inclusion.');
+export type SignatureCursor={at:string;id:string;query:string};
+export type SignaturePage={results:SignatureSummary[];next:SignatureCursor|null;settings:SignatureDefaults};

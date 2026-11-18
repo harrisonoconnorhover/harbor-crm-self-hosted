@@ -1,0 +1,69 @@
+x-harbor: &harbor
+  image: ${HARBOR_IMAGE:?Set HARBOR_IMAGE to the built Harbor release image}
+  init: true
+  restart: unless-stopped
+
+services:
+  web:
+    <<: *harbor
+    env_file: .harbor/compose/web.env
+    environment:
+      HARBOR_PORTABLE_MODE: hosted
+      PORT: "8787"
+    ports:
+      - "127.0.0.1:${HARBOR_HTTP_PORT:-8787}:8787"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz',{signal:AbortSignal.timeout(8000)}).then(async r=>{if(!r.ok||await r.text()!=='ready')process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 15s
+
+  worker:
+    <<: *harbor
+    profiles: [jobs]
+    env_file: .harbor/compose/worker.env
+    environment:
+      HARBOR_PORTABLE_MODE: hosted
+      HARBOR_PORTABLE_WORKER_ENABLED: "true"
+    command: ["node", "scripts/portable-web.mjs", "worker"]
+    stop_grace_period: 2m
+
+  backup:
+    <<: *harbor
+    profiles: [backups]
+    env_file: .harbor/compose/backup.env
+    environment:
+      HARBOR_PORTABLE_MODE: hosted
+      HARBOR_PORTABLE_BACKUP_ENABLED: "true"
+      HARBOR_BACKUP_MIN_FREE_MIB: "${HARBOR_BACKUP_MIN_FREE_MIB:-}"
+    command: ["node", "scripts/portable-web.mjs", "backup-service", "/backups"]
+    volumes:
+      - type: bind
+        source: ${HARBOR_BACKUP_DIR:-./.harbor/compose/backups}
+        target: /backups
+        bind:
+          create_host_path: false
+    stop_grace_period: 15m
+
+  monitor:
+    <<: *harbor
+    profiles: [monitoring]
+    restart: "no"
+    env_file: .harbor/compose/monitor.env
+    environment:
+      HARBOR_PORTABLE_MODE: hosted
+      HARBOR_BACKUP_MIN_FREE_MIB: "${HARBOR_BACKUP_MIN_FREE_MIB:-}"
+    command: ["node", "scripts/portable-web.mjs", "monitor-status", "/backups", "--web", "--expect-build", "packaged", "--expect-backup-service", "--prometheus-file", "/collector/harbor.prom"]
+    volumes:
+      - type: bind
+        source: ${HARBOR_BACKUP_DIR:-./.harbor/compose/backups}
+        target: /backups
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HARBOR_MONITOR_COLLECTOR_DIR:-./.harbor/compose/collector}
+        target: /collector
+        bind:
+          create_host_path: false

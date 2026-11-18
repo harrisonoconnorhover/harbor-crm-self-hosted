@@ -1,0 +1,3 @@
+ALTER TABLE "portable_jobs" ADD COLUMN "authorized_owner_id" text;--> statement-breakpoint
+ALTER TABLE "portable_workspace_viewers" ADD COLUMN "scheduled_notes" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_jobs" ADD CONSTRAINT "portable_jobs_authorized_owner_id_login_identities_id_fk" FOREIGN KEY ("authorized_owner_id") REFERENCES "public"."login_identities"("id") ON DELETE no action ON UPDATE no action;

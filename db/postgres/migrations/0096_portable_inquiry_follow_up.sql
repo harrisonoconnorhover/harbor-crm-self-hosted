@@ -1,0 +1,2 @@
+ALTER TABLE "portable_lead_inquiries" ADD COLUMN "handled" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_lead_inquiries" ADD COLUMN "triage_revision" integer DEFAULT 0 NOT NULL;

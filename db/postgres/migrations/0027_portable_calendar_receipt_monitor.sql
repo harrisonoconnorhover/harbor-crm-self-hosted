@@ -1,0 +1,1 @@
+CREATE INDEX "portable_calendar_receipts_pending" ON "portable_calendar_meetings" USING btree ("status",coalesce("cancellation_started_at","created_at")) WHERE "portable_calendar_meetings"."status" IN ('submitting','attention','cancelling','cancel_attention');

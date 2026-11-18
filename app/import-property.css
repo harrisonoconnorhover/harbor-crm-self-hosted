@@ -1,0 +1,12 @@
+.import-property-dialog{inset:0 0 0 auto;margin:0;width:min(560px,100vw);height:100dvh;max-height:100dvh;border-radius:0;overflow:auto}
+.import-property-dialog .import-property-form{padding:24px;display:grid;gap:20px;min-width:0}
+.import-property-form p{font-size:13px;line-height:1.6;margin:0;overflow-wrap:anywhere}
+.import-property-form .form-field{display:grid;gap:8px;min-width:0}
+.import-property-form input:not([type=checkbox]),.import-property-form select,.import-property-form textarea{width:100%;min-width:0;max-width:100%;padding:10px;border:1px solid #b8c2cc;border-radius:4px;font:inherit;color:inherit;background:white}
+.import-property-form .import-property-check{display:flex;align-items:center;gap:9px}
+.import-property-form textarea{min-height:72px;resize:vertical}
+.import-property-form summary{color:#00777e;font-weight:600;cursor:pointer}
+.import-property-form details>fieldset{margin-top:16px}
+.import-property-check input{width:16px;height:16px;flex-shrink:0}
+.import-property-actions{display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.import-create-property{margin-top:8px;font-size:13px}

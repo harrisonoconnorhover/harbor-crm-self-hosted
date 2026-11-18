@@ -1,0 +1,177 @@
+.portable-contacts > .portable-record-detail {
+  background: #f4f7f6;
+  border: 0;
+  padding: 0;
+}
+
+.portable-record-heading {
+  background: #fff;
+  border: 1px solid #dde5e4;
+  border-radius: 10px;
+  padding: 14px clamp(14px, 2vw, 24px) 0;
+}
+
+.portable-record-heading nav[aria-label="Record breadcrumb"] { margin: 0 0 14px; }
+.portable-record-heading nav[aria-label="Record breadcrumb"] :is(a, button) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #075e63;
+  font-size: .875rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.portable-record-identity { display: flex; gap: 12px; align-items: center; }
+.portable-record-icon {
+  display: grid;
+  width: 47px;
+  height: 47px;
+  flex: none;
+  place-items: center;
+  border-radius: 10px;
+  background: #e5f1ec;
+  color: #145e57;
+}
+.portable-record-identity > div { min-inline-size: 0; }
+.portable-record-identity h1 { margin: 0; font-size: clamp(1.4rem, 2.4vw, 1.85rem); line-height: 1.22; overflow-wrap: anywhere; }
+.portable-record-identity h1 { scroll-margin-block-start: calc(var(--portable-topbar-height, 0px) + 12px); }
+.portable-record-identity p { margin: 3px 0 0; color: #53686a; font-size: .875rem; overflow-wrap: anywhere; }
+.portable-contacts .portable-record-heading .portable-record-jumps {
+  margin: 14px 0 0;
+  padding: 7px 0;
+  border: 0;
+  border-block-start: 1px solid #e2eae8;
+  border-radius: 0;
+  background: transparent;
+}
+
+.portable-record-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 25%);
+  gap: 12px 16px;
+  align-items: start;
+  margin-block-start: 16px;
+}
+.portable-record-profile { grid-column: 1; grid-row: 1; }
+.portable-record-relationships { grid-column: 2; grid-row: 1 / 3; }
+.portable-record-activity { grid-column: 1; grid-row: 2; }
+.portable-record-layout > * { min-inline-size: 0; }
+.portable-record-layout :is(.portable-record-profile, .portable-record-relationships) {
+  scroll-margin-block-start: calc(var(--portable-topbar-height, 0px) + 12px);
+}
+.portable-record-layout :is(.portable-record-profile, .portable-record-relationships):target {
+  outline: 2px solid #83b2a7;
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.portable-record-layout :is(.portable-contact-text, .portable-record-properties, .portable-record-extra-properties, .portable-record-editor, .portable-additional-associations) {
+  margin: 0 0 12px;
+  max-inline-size: none;
+  background: #fff;
+  border: 1px solid #dde5e4;
+  border-radius: 10px;
+  padding: clamp(12px, 1.8vw, 20px);
+}
+.portable-record-layout .portable-contact-text form { margin-block-end: 0; }
+.portable-record-layout .portable-record-editor > h2 { font-size: 1.125rem; font-weight: 700; }
+.portable-record-layout .portable-record-editor > fieldset > label {
+  flex: 1 1 13rem;
+  min-inline-size: 0;
+  color: #385556;
+  font-size: .875rem;
+  font-weight: 650;
+}
+.portable-record-layout .portable-record-editor :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.portable-record-layout .portable-record-editor > fieldset > details { flex-basis: 100%; }
+.portable-record-layout .portable-record-editor > fieldset > details > label { margin-block: 6px; max-inline-size: 28rem; }
+.portable-record-layout .portable-contact-text h2, .portable-record-card-heading h2, .portable-additional-associations h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+.portable-record-card-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.portable-record-layout :is(.portable-contact-text dl, .portable-property-grid, .portable-record-extra-properties details > dl) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: 14px 20px;
+  margin-block: 14px 0;
+}
+.portable-record-layout :is(.portable-contact-text, .portable-property-grid, .portable-record-extra-properties) dt {
+  color: #4e6668;
+  font-size: .8125rem;
+  font-weight: 650;
+}
+.portable-record-layout :is(.portable-contact-text, .portable-property-grid, .portable-record-extra-properties) dd {
+  margin: 2px 0 0;
+  color: #263a3d;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.portable-record-layout .portable-contact-text dd button {
+  background: #f4f8f7;
+  padding: 5px 7px;
+  min-inline-size: min(100%, 70px);
+  color: #075e63;
+}
+.portable-record-layout .portable-contact-text dd button:not(:disabled):hover { border-color: #7bac9f; }
+.portable-record-extra-properties > details + details { margin-block-start: 9px; }
+.portable-record-extra-properties summary { cursor: pointer; color: #075e63; font-weight: 650; }
+.portable-contacts .portable-record-archive > button { color: #7d4640; font-size: .8125rem; }
+.portable-record-activity > :first-child { margin-block-start: 0; }
+
+.portable-contacts .portable-record-relationships nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  margin: 10px 0 0;
+}
+.portable-record-relationships a { overflow-wrap: anywhere; }
+.portable-linked-record-group {
+  min-inline-size: 0;
+  padding-block: 8px;
+  border-block-start: 1px solid #e6eeec;
+}
+.portable-linked-record-group :is(h3, p) { margin: 0; font-size: .875rem; }
+.portable-linked-record-group h3 { margin-block-end: 3px; font-weight: 700; }
+.portable-linked-record-group p { color: #52676a; }
+.portable-linked-record-group ul, .portable-additional-associations > ul { list-style: none; margin: 5px 0 0; padding: 0; }
+.portable-linked-record-group li + li { margin-block-start: 3px; }
+.portable-contacts .portable-linked-record-group a, .portable-contacts .portable-additional-associations li a {
+  color: #075e63;
+  font-weight: 650;
+  font-size: .875rem;
+  text-decoration: none;
+}
+.portable-contacts .portable-linked-record-group a:hover, .portable-contacts .portable-additional-associations li a:hover { text-decoration: underline; }
+.portable-linked-record-group li a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  background: #f3f8f6;
+  border-radius: 5px;
+}
+.portable-linked-record-group li svg { flex: none; }
+.portable-linked-record-actions { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.portable-contacts .portable-record-action { display: inline-block; margin-block-start: 4px; }
+.portable-linked-record-actions .portable-record-action { margin-block-start: 0; }
+.portable-additional-associations li { display: grid; gap: 3px; border-block-end: 1px solid #e6eeec; padding-block: 7px; }
+.portable-additional-associations li p { margin: 0; font-size: .8125rem; color: #52676a; }
+.portable-additional-associations li button { justify-self: start; font-size: .8125rem; padding: 4px 7px; }
+.portable-additional-associations summary { margin-block-start: 8px; color: #075e63; cursor: pointer; font-size: .875rem; font-weight: 650; }
+.portable-contacts .portable-additional-associations form { margin-block-end: 0; padding: 0; border: 0; }
+.portable-contacts .portable-additional-associations fieldset { display: grid; min-inline-size: 0; }
+.portable-additional-associations :is(input, select) { inline-size: 100%; min-inline-size: 0; }
+
+@media (max-width: 820px) {
+  .portable-record-layout { grid-template-columns: minmax(0, 1fr); }
+  .portable-record-layout > * { grid-area: auto; }
+  .portable-record-heading .portable-record-jumps a { min-height: 36px; }
+}

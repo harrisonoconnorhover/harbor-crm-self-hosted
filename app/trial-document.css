@@ -1,0 +1,25 @@
+.trial-document{min-height:100dvh;background:#f5f8f7;color:#243f42;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:0 28px}
+.trial-document *{box-sizing:border-box}
+.trial-document-header,.trial-document-main,.trial-document-footer{max-width:760px;margin:0 auto}
+.trial-document-header{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:28px 0 40px}
+.trial-document a{color:#075d61;text-underline-offset:3px}
+.trial-document-brand{display:inline-flex;align-items:center;gap:8px;font-size:27px;font-weight:700;letter-spacing:-1px;text-decoration:none}
+.trial-document-back{display:inline-flex;align-items:center;gap:6px;font-size:13px;text-decoration:none}
+.trial-document-eyebrow{font-size:12px;color:#58716c;margin:0 0 16px}
+.trial-document h1{font-size:clamp(32px,5vw,44px);line-height:1.12;letter-spacing:-1.2px;margin:0 0 16px;font-weight:650}
+.trial-document-intro{font-size:18px;line-height:1.6;color:#52676a;margin:0 0 26px}
+.trial-document-scope{border:1px solid #d8e6de;background:#edf4ef;border-radius:9px;padding:16px 18px;font-size:13px;line-height:1.65;color:#375c54;margin-bottom:32px}
+.trial-document-contact{margin-top:12px;overflow-wrap:anywhere}
+.trial-document article{background:white;border:1px solid #dbe5e2;border-radius:12px;padding:8px 32px 28px}
+.trial-document section{padding-top:24px}
+.trial-document section+section{border-top:1px solid #e8eeeb;margin-top:24px}
+.trial-document h2{font-size:19px;line-height:1.4;margin:0 0 10px;font-weight:650;color:#193f42}
+.trial-document article p{font-size:15px;line-height:1.75;margin:0 0 12px;overflow-wrap:anywhere}
+.trial-document article p:last-child{margin-bottom:0}
+.trial-document-footer{padding:28px 0 36px;font-size:12px;color:#607571}
+.trial-document-footer nav{display:flex;flex-wrap:wrap;gap:18px}
+.trial-document-footer p{margin:14px 0 0}
+.trial-document a:focus-visible{outline:3px solid #299ab2;outline-offset:4px;border-radius:3px}
+.welcome-policy-links{display:flex;flex-wrap:wrap;gap:16px;margin-top:18px;font-size:12px}
+.welcome-policy-links a{color:#27635d;text-underline-offset:3px}
+@media(max-width:480px){.trial-document{padding:0 18px}.trial-document-header{padding:22px 0 30px}.trial-document-brand{font-size:24px}.trial-document-back{font-size:12px}.trial-document-intro{font-size:16px}.trial-document article{padding:0 20px 22px}.trial-document h2{font-size:18px}}

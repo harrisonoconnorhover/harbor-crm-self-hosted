@@ -1,0 +1,12 @@
+import {z} from 'zod';
+import {utcDateTime} from '../iso-date-time';
+export function validTimeZone(zone:string){try{new Intl.DateTimeFormat('en',{timeZone:zone}).format();return true;}catch{return false;}}
+export const scheduleEmailInput=z.object({id:z.string().guid("Invalid uuid"),revision:z.number().int().positive(),connectionId:z.string().guid("Invalid uuid"),at:utcDateTime,timeZone:z.string().min(1).max(100).refine(validTimeZone,'Choose a valid time zone.')}).strict();
+export function validateScheduleTime(at:string,now=new Date()){const date=new Date(at),latest=new Date(now);latest.setUTCMonth(latest.getUTCMonth()+6);if(!Number.isFinite(+date)||+date<=+now)throw Error('Choose a future delivery time.');if(+date>+latest)throw Error('Schedule up to six months ahead.');return date.toISOString();}
+export function localDateTime(at:Date,zone:string){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(at),get=(key:string)=>parts.find(p=>p.type===key)!.value;return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;}
+// Match actual instants instead of silently normalizing a nonexistent DST wall time.
+export function scheduledInstants(local:string,zone:string){if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local)||!validTimeZone(zone))return [];const guess=Date.parse(local+'Z');if(!Number.isFinite(guess))return [];const offsets=new Set<number>();for(const day of [-2,-1,0,1,2]){const at=new Date(guess+day*86400000),wall=Date.parse(localDateTime(at,zone)+'Z');offsets.add(wall-+at);}return [...offsets].map(offset=>new Date(guess-offset)).filter(at=>localDateTime(at,zone)===local).map(at=>at.toISOString()).sort();}
+export function tomorrowMorning(zone:string,now=new Date()){const today=localDateTime(now,zone).slice(0,10),tomorrow=new Date(today+'T12:00:00Z');tomorrow.setUTCDate(tomorrow.getUTCDate()+1);return tomorrow.toISOString().slice(0,10)+'T08:00';}
+export type ScheduledEmailRun={status:'idle'|'sent'|'attention'|'changed'|'retrying';id?:string;state?:string;error?:string;loggingPending?:true;automationPending?:true;recipientBlocked?:true;expired?:true;hasMore:boolean};
+export type ScheduledEmailRow={id:string;recordId:string;recordName:string;subject:string;at:string;timeZone:string;sender:string;state:string;revision:number;error:string;mailboxUnavailable?:boolean;recipientBlocked?:boolean};
+export type ScheduledEmailPage={results:ScheduledEmailRow[];next:{at:string;id:string}|null};

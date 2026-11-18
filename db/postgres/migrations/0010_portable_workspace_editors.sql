@@ -1,0 +1,2 @@
+ALTER TABLE "portable_workspace_viewers" ADD COLUMN "role" text DEFAULT 'viewer' NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_workspace_viewers" ADD CONSTRAINT "portable_workspace_viewer_role" CHECK ("portable_workspace_viewers"."role" IN ('viewer','editor'));

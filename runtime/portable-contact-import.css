@@ -1,0 +1,231 @@
+.portable-contacts :where(#portable-record-import, #portable-paired-import) {
+  max-inline-size: 56rem;
+  margin-block: 8px;
+}
+.portable-contacts :where(#portable-record-import, #portable-paired-import) > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  padding: 7px 10px;
+  border: 1px solid #dbe5e2;
+  border-radius: 6px;
+  color: #075e63;
+  background: #fff;
+  font-weight: 650;
+  list-style: none;
+  cursor: pointer;
+}
+.portable-contacts :where(#portable-record-import, #portable-paired-import) > summary::-webkit-details-marker {
+  display: none;
+}
+.portable-contacts :where(#portable-record-import, #portable-paired-import) > summary::after {
+  content: "";
+  inline-size: 7px;
+  block-size: 7px;
+  flex: none;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+.portable-contacts :where(#portable-record-import, #portable-paired-import)[open] > summary::after {
+  transform: translateY(2px) rotate(225deg);
+}
+.portable-contacts :where(#portable-record-import, #portable-paired-import) > summary:hover {
+  background: #edf5f3;
+}
+.portable-contacts :where(#portable-record-import, #portable-paired-import) > summary:focus-visible {
+  outline: 2px solid #78b9d7;
+  outline-offset: 2px;
+}
+.portable-csv-import {
+  margin-block-start: 8px;
+  padding: clamp(12px, 2vw, 20px);
+  border: 1px solid #dbe5e2;
+  border-radius: 10px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.portable-csv-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.portable-csv-steps li {
+  padding: 7px 8px;
+  border-block-end: 2px solid #dde5e4;
+  color: #52676a;
+  font-weight: 600;
+  text-align: center;
+}
+.portable-csv-steps [aria-current="step"] {
+  border-block-end-color: #075e63;
+  border-radius: 5px 5px 0 0;
+  background: #eaf4f2;
+  color: #075e63;
+}
+.portable-csv-guidance {
+  max-inline-size: 70ch;
+  margin: 0 0 12px;
+  color: #435b5d;
+}
+.portable-contacts .portable-csv-import > form {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.portable-contacts .portable-csv-import > form > button {
+  justify-self: start;
+}
+.portable-csv-upload {
+  padding: 12px;
+  border: 1px dashed #93b1ae;
+  border-radius: 8px;
+  background: #f4f8f7;
+  font-weight: 650;
+}
+.portable-contacts .portable-csv-upload input {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #435b5d;
+  font-weight: 400;
+}
+.portable-csv-upload input::file-selector-button {
+  margin-inline-end: 8px;
+  padding: 6px 10px;
+  border: 1px solid #afc2c1;
+  border-radius: 5px;
+  background: #fff;
+  color: #075e63;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.portable-contacts .portable-csv-mapping {
+  display: block;
+  min-inline-size: 0;
+  margin: 0;
+}
+.portable-csv-mapping legend, .portable-csv-review-heading h2 {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.portable-csv-mapping p, .portable-csv-review-heading p {
+  margin-block: 3px 8px;
+  color: #435b5d;
+}
+.portable-csv-mapping ul, .portable-csv-review-rows {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.portable-csv-mapping li {
+  padding: 6px 10px;
+  border: 1px solid #e3ebea;
+  border-radius: 6px;
+  background: #f8fbfa;
+}
+.portable-contacts .portable-csv-mapping label {
+  grid-template-columns: minmax(0, .75fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+}
+.portable-csv-mapping select {
+  inline-size: 100%;
+  min-inline-size: 0;
+  font-weight: 400;
+}
+.portable-csv-column-number {
+  color: #52676a;
+  font-weight: 400;
+}
+.portable-csv-review {
+  margin-block-start: 16px;
+  padding: 12px;
+  border: 1px solid #dbe5e2;
+  border-radius: 8px;
+  background: #f7faf9;
+}
+.portable-csv-review-rows > li {
+  padding: 8px 10px;
+  border: 1px solid #e3ebea;
+  border-radius: 6px;
+  background: #fff;
+}
+.portable-csv-row-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin-block-end: 4px;
+  color: #52676a;
+}
+.portable-csv-row-state {
+  padding: 2px 7px;
+  border-radius: 12px;
+  background: #eff2f2;
+  color: #3c5355;
+  font-size: .75rem;
+  font-weight: 650;
+}
+.portable-csv-row-state[data-state="create"] { background: #dcefe7; color: #215746; }
+.portable-csv-row-state[data-state="error"] { background: #fbe9e6; color: #912e25; }
+.portable-csv-row-state[data-state="update"] { background: #eaf1f9; color: #294d77; }
+.portable-csv-match-help { margin-block: 8px 12px; }
+.portable-csv-match-help p { margin-block-end: 8px; }
+.portable-contacts label.portable-csv-choice {
+  display: flex; align-items: baseline; gap: 8px; cursor: pointer;
+}
+.portable-contacts .portable-csv-choice input { width: 1rem; height: 1rem; flex: none; accent-color: #075e63; }
+.portable-csv-choice small { color: #52676a; font-weight: 400; }
+.portable-csv-changes { margin: 8px 0 0; }
+.portable-csv-changes > div { display: grid; grid-template-columns: 1fr 1.4fr 1.4fr; gap: 6px 14px; padding-block: 6px; border-top: 1px solid #e3ebea; }
+.portable-csv-changes dt { font-weight: 600; }
+.portable-csv-changes dd { margin: 0; min-width: 0; white-space: pre-wrap; }
+.portable-csv-changes dd span { display: block; color: #52676a; font-size: .78rem; }
+.portable-csv-row-values ul {
+  margin-block-start: 4px;
+  padding-inline-start: 16px;
+  list-style: disc;
+}
+.portable-csv-review-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-block-start: 12px;
+}
+.portable-contacts .portable-csv-review-footer button {
+  background: #075e63;
+  border-color: #075e63;
+  color: #fff;
+}
+.portable-csv-feedback:not(:empty) {
+  margin-block-start: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #eaf4f2;
+  color: #215746;
+}
+.portable-csv-feedback[role="alert"] {
+  background: #fbe9e6;
+  color: #912e25;
+}
+@media (max-width: 520px) {
+  .portable-contacts .portable-csv-mapping label { grid-template-columns: minmax(0, 1fr); }
+  .portable-csv-changes > div { grid-template-columns: 1fr 1fr; }
+  .portable-csv-changes dt { grid-column: 1 / -1; }
+}

@@ -1,0 +1,1 @@
+ALTER TABLE "portable_workspace_viewers" ADD COLUMN "record_activities" boolean DEFAULT false NOT NULL;

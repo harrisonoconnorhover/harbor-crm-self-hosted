@@ -1,0 +1,1 @@
+ALTER TABLE "contact_file_versions" ADD COLUMN "storage_contact_id" uuid;

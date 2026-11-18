@@ -1,0 +1,2 @@
+ALTER TABLE "portable_contact_activities" DROP CONSTRAINT "portable_contact_activity_kind";--> statement-breakpoint
+ALTER TABLE "portable_contact_activities" ADD CONSTRAINT "portable_contact_activity_kind" CHECK ("portable_contact_activities"."kind" IN ('Note','Email','Call','Meeting','LinkedIn','SMS','WhatsApp','Postal mail'));

@@ -1,0 +1,2 @@
+ALTER TABLE "portable_lead_form_note_sources" ADD COLUMN "retry_at" bigint;--> statement-breakpoint
+ALTER TABLE "portable_lead_form_note_sources" ADD CONSTRAINT "portable_lead_form_note_source_retry" CHECK ("portable_lead_form_note_sources"."retry_at" IS NULL OR "portable_lead_form_note_sources"."state"='waiting');

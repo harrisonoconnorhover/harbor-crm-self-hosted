@@ -1,0 +1,87 @@
+import {env} from 'cloudflare:workers';
+import {redirect} from 'next/navigation';
+import {Anchor,ArrowRight,Check,LockKeyhole} from 'lucide-react';
+import {authMode,googleLoginCallbackPath,googleLoginSetupIssues,loginConfig,loginOrigin,safeReturnPath} from '@/lib/identity';
+import {readPublicPilotContact} from '@/lib/public-pilot-contact.mjs';
+import {portableTrial} from '@/lib/trial-platform';
+import '../auth.css';
+import '../../trial-document.css';
+export const dynamic='force-dynamic';
+const signInSettings={
+  HARBOR_LOGIN_GOOGLE_CLIENT_ID:'Paste the Google web client ID without spaces or line breaks.',
+  HARBOR_LOGIN_GOOGLE_CLIENT_SECRET:'Paste the secret for the same Google web client without spaces or line breaks.',
+  HARBOR_LOGIN_ALLOWED_EMAILS:'The approved Google email addresses, separated by commas. Enter each address in full.',
+};
+export default async function SignIn({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
+  const params=await searchParams,returnTo=safeReturnPath(params.return_to);
+  if(authMode(env)==='sites')redirect('/signin-with-chatgpt?return_to='+encodeURIComponent(returnTo));
+  const support=portableTrial?readPublicPilotContact(env.HARBOR_PUBLIC_PILOT_CONTACT):null;
+  const reference=portableTrial&&params.error==='sign_in_failed'&&typeof params.reference==='string'
+    &&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(params.reference)
+    ?params.reference:null;
+  let configured=true,setupCallback:string|undefined;
+  try{loginConfig(env)}catch{
+    configured=false;
+    try{setupCallback=loginOrigin(env).origin+googleLoginCallbackPath;}catch{/* No callback to show until the origin is valid. */}
+  }
+  const setupIssues=portableTrial&&setupCallback?googleLoginSetupIssues(env):null;
+  const missingSettings=setupIssues?.missing??Object.keys(signInSettings) as (keyof typeof signInSettings)[];
+  const settingsToCheck=[...missingSettings,...(setupIssues?.invalidCredentials??[])];
+  const needsClient=missingSettings.includes('HARBOR_LOGIN_GOOGLE_CLIENT_ID')&&missingSettings.includes('HARBOR_LOGIN_GOOGLE_CLIENT_SECRET');
+  return <div className="welcome-page">
+    <header className="welcome-header">
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- Re-enter the authentication boundary with ordinary document navigation. */}
+      <a className="auth-brand welcome-brand" href="/" aria-label="Harbor CRM home"><Anchor size={27} aria-hidden="true"/><span>harbor.</span></a>
+      <span className="welcome-status"><span aria-hidden="true"/>Early access</span>
+    </header>
+    <main className="welcome-main">
+      <section className="welcome-intro" aria-labelledby="welcome-title">
+        <p className="welcome-eyebrow">A clear place for your customer relationships</p>
+        <h1 id="welcome-title">Your relationships,<br/>in focus.</h1>
+        <p className="welcome-description">Keep your contacts, companies and deals together. See the conversation history and the next step in one familiar workspace.</p>
+        <ul className="welcome-highlights" aria-label="Harbor features">
+          {['Contacts & companies','Deal pipelines','Notes & follow-ups'].map(label=><li key={label}><Check size={15} aria-hidden="true"/>{label}</li>)}
+        </ul>
+      </section>
+      <section className="auth-card welcome-signin" id="sign-in" aria-labelledby="signin-title">
+        <span className="welcome-card-icon" aria-hidden="true"><Anchor size={24}/></span>
+        <h2 id="signin-title">Sign in to Harbor</h2>
+        <p className="welcome-card-description">Use your Google account to continue.</p>
+        {params.error&&<p role="alert">Sign-in could not be completed. Please start again and choose your Google account.</p>}
+        {reference&&<p className="auth-note welcome-support">If you contact support, share this reference <code>{reference}</code>.</p>}
+        {params.signed_out&&<p role="status">You’re signed out of Harbor.</p>}
+        {configured?<a className="auth-primary welcome-google" href={'/auth/google/start?return_to='+encodeURIComponent(returnTo)} target="_top"><span>Continue with Google</span><ArrowRight size={18} aria-hidden="true"/></a>:<p role="alert">Google sign-in needs configuration. Contact the workspace administrator.</p>}
+        {setupCallback&&<details className="welcome-setup">
+          <summary>Setting up this installation?</summary>
+          <ol>
+            {needsClient&&<li>In your Google Cloud project, create a Web application OAuth client for Harbor sign-in. If Google asks for test users, add the people who should sign in.</li>}
+            <li>Add this exact URL to <strong>Authorized redirect URIs</strong>.<code>{setupCallback}</code></li>
+            {settingsToCheck.length>0&&<li>In your hosting dashboard, open this Harbor app’s private environment settings and check the settings below.
+              <dl className="welcome-setup-secrets">
+                {settingsToCheck.map(key=><div key={key}><dt><code>{key}</code></dt><dd>{signInSettings[key]}</dd></div>)}
+              </dl>
+            </li>}
+            {setupIssues?.invalidAllowlist&&<li>Fix <code>HARBOR_LOGIN_ALLOWED_EMAILS</code> in your hosting dashboard. Enter up to 100 full email addresses separated by commas, with no empty entries.</li>}
+            <li>Apply the settings and reload this page. When the Google sign-in button appears, sign in with an approved account.</li>
+          </ol>
+        </details>}
+        <p className="auth-note welcome-permissions"><LockKeyhole size={16} aria-hidden="true"/><span>Sign-in shares your name and email address with Harbor. It does not connect Gmail or Calendar.</span></p>
+        <p className="auth-note welcome-invite">Joining a shared workspace? Use the Google account that received the invitation.</p>
+        {portableTrial&&<p className="auth-note welcome-support">
+          {support?<>Need help signing in? <a href={'mailto:'+support.email}>Contact {support.name}</a>.</>:
+            'Need help signing in? Contact the person who invited you.'}
+        </p>}
+        <nav className="welcome-policy-links" aria-label="Trial information"><a href="/privacy">Trial privacy</a><a href="/terms">Trial terms</a></nav>
+      </section>
+      <figure className="welcome-preview" aria-labelledby="welcome-preview-caption">
+        <div className="welcome-preview-heading"><strong>Contacts</strong><span>All contacts</span><span className="welcome-preview-count">3 records</span></div>
+        <div className="welcome-preview-table"><table><thead><tr><th>Contact</th><th>Company</th><th>Next step</th></tr></thead><tbody>
+          <tr><td><span className="welcome-avatar" aria-hidden="true">MC</span><strong>Mira Chen</strong></td><td>Juniper Studio</td><td><span className="welcome-next-step">Review proposal</span></td></tr>
+          <tr><td><span className="welcome-avatar" aria-hidden="true">SR</span><strong>Sam Rivera</strong></td><td>Northline Supply</td><td>Book follow-up</td></tr>
+          <tr><td><span className="welcome-avatar" aria-hidden="true">AM</span><strong>Alex Morgan</strong></td><td>Fieldwork Co.</td><td>Check in Friday</td></tr>
+        </tbody></table></div>
+        <figcaption id="welcome-preview-caption">Illustrative workspace · Fictional sample data</figcaption>
+      </figure>
+    </main>
+  </div>;
+}

@@ -1,0 +1,13 @@
+.unsubscribe-page{min-height:100dvh;display:grid;place-items:center;padding:32px 20px;background:#f4f8f7;color:#193e42}
+.unsubscribe-card{width:100%;max-width:530px;padding:36px;background:#fff;border:1px solid #dbe5e6;border-radius:16px;box-shadow:0 10px 36px #193e4208}
+.unsubscribe-brand{display:block;color:#00636a;font-size:24px;font-weight:700;margin-bottom:30px}
+.unsubscribe-card h1{font-size:29px;line-height:1.2;margin:0 0 18px}
+.unsubscribe-card p{line-height:1.6;margin:16px 0}
+.unsubscribe-card button{width:100%;padding:13px 18px;margin:10px 0;border:0;border-radius:7px;background:#00636a;color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.unsubscribe-card button:disabled{opacity:.65;cursor:wait}
+.unsubscribe-card button:focus-visible,.unsubscribe-card a:focus-visible{outline:3px solid #64b6c5;outline-offset:4px}
+.unsubscribe-detail{font-size:14px;color:#526d73}
+.unsubscribe-card a{color:#00636a}
+.unsubscribe-card [role=alert]{color:#a62f12}
+.unsubscribe-success{padding:14px;border:1px solid #98c8b2;border-radius:6px;background:#eff9f3}
+@media(max-width:420px){.unsubscribe-card{padding:25px 20px}.unsubscribe-card h1{font-size:25px}}

@@ -1,0 +1,221 @@
+groups:
+  - name: harbor-portable
+    rules:
+      - record: harbor:monitor_report_fresh
+        expr: |
+          (time() - harbor_monitor_checked_at_seconds{job="harbor-monitor"} >= bool -30)
+          *
+          (time() - harbor_monitor_checked_at_seconds{job="harbor-monitor"} <= bool 180)
+      - alert: HarborMonitorSectionUnhealthy
+        expr: |
+          max without (status) (
+            harbor_monitor_section_status{job="harbor-monitor",status=~"attention|unavailable"}
+          ) == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+          unless on (job, instance, section)
+          (
+            label_replace(harbor_monitor_worker_issue{job="harbor-monitor"} == 1, "section", "worker", "job", ".+")
+            or label_replace(harbor_monitor_gmail_reconnect_required{job="harbor-monitor"} == 1, "section", "gmailQueue", "job", ".+")
+            or label_replace(harbor_monitor_gmail_worker_missing{job="harbor-monitor"} == 1, "section", "gmailQueue", "job", ".+")
+            or (harbor_monitor_section_status{job="harbor-monitor",section=~"inquiryFollowUp|calendar|workflowCapacity",status="attention"} == 1)
+            or label_replace(harbor_monitor_task_worker_missing{job="harbor-monitor"} == 1, "section", "taskQueue", "job", ".+")
+            or label_replace(harbor_monitor_full_worker_missing{job="harbor-monitor"} == 1, "section", "fullWorker", "job", ".+")
+            or label_replace(harbor_monitor_segment_scan_overdue{job="harbor-monitor"} == 1, "section", "segments", "job", ".+")
+            or label_replace(harbor_monitor_web_issue{job="harbor-monitor"} == 1, "section", "web", "job", ".+")
+            or label_replace(harbor_monitor_backup_issue{job="harbor-monitor"} == 1, "section", "backups", "job", ".+")
+          )
+        annotations:
+          summary: "Harbor {{ $labels.section }} needs attention"
+      - alert: HarborMonitorWorkerIssue
+        expr: |
+          (
+            (harbor_monitor_worker_issue{job="harbor-monitor",issue!="needs_review"} == 1)
+            or (
+              (harbor_monitor_worker_issue{job="harbor-monitor",issue="needs_review"} == 1)
+              unless on (job, instance)
+              (harbor_monitor_worker_issue{job="harbor-monitor",issue=~"failed|uncertain|suppressed_email"} == 1)
+            )
+          )
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: >-
+            {{- if eq $labels.issue "failed" -}}
+            Harbor jobs failed and need review
+            {{- else if eq $labels.issue "uncertain" -}}
+            Harbor jobs have unconfirmed outcomes
+            {{- else if eq $labels.issue "suppressed_email" -}}
+            Harbor skipped email for recipients on the do-not-email list
+            {{- else if eq $labels.issue "poll_stalled" -}}
+            Harbor worker job polling has stalled
+            {{- else -}}
+            Harbor worker issue: {{ $labels.issue }}
+            {{- end -}}
+          description: >-
+            {{- if eq $labels.issue "failed" -}}
+            Open the queue and inspect the job attempts before choosing a next step.
+            {{- else if eq $labels.issue "uncertain" -}}
+            Check the destination for the original action and reconcile the saved receipt.
+            {{- else if eq $labels.issue "suppressed_email" -}}
+            Review the recorded suppression in the queue.
+            {{- else if eq $labels.issue "poll_stalled" -}}
+            The worker heartbeat is current. Check worker logs for job poll errors or blocked database queries, then review the queue.
+            {{- end -}}
+          queue_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=job-queue&queue=issues
+            {{- if match "^(overdue|expired_claim|needs_review|failed|uncertain|suppressed_email)$" $labels.issue -}}
+            &jobIssue={{ $labels.issue }}
+            {{- end -}}
+            {{- end -}}
+      - alert: HarborScheduledGmailWorkerMissing
+        expr: |
+          harbor_monitor_gmail_worker_missing{job="harbor-monitor"} == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor scheduled Gmail has no recent worker poll"
+          description: "Check the Gmail worker startup mode and run doctor worker --check-gmail. Review pending email and its send window before restarting the worker."
+          queue_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=job-queue&queue=pending&jobKind=gmail
+            {{- end -}}
+      - alert: HarborScheduledGmailReconnect
+        expr: |
+          harbor_monitor_gmail_reconnect_required{job="harbor-monitor"} == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor scheduled Gmail needs a reconnect"
+          description: "Reconnect the scheduled Gmail mailbox, verify the connection, and review the failed email before scheduling a new send."
+          queue_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=job-queue&queue=issues&jobKind=gmail&jobIssue=failed
+            {{- end -}}
+      - alert: HarborCalendarReceiptNeedsReview
+        expr: |
+          max without (section, status) (
+            harbor_monitor_section_status{job="harbor-monitor",section="calendar",status="attention"}
+          ) == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor Calendar has changes to review"
+          description: "Open Calendar and use Check invitation, Check reschedule, or Check cancellation on the original receipt before repeating a change."
+          calendar_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=calendar&filter=needs_review
+            {{- end -}}
+      - alert: HarborInquiryFollowUpOverdue
+        expr: |
+          max without (section, status) (
+            harbor_monitor_section_status{job="harbor-monitor",section="inquiryFollowUp",status="attention"}
+          ) == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor has website inquiries overdue for follow-up"
+          description: "Review inquiries that have been open for at least 24 hours."
+          inquiries_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=forms&inquiries=workspace&filter=overdue
+            {{- end -}}
+      - alert: HarborWorkflowCapacitySkipped
+        expr: |
+          max without (section, status) (
+            harbor_monitor_section_status{job="harbor-monitor",section="workflowCapacity",status="attention"}
+          ) == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor has workflow runs skipped by a full queue"
+          description: "Open the missed runs, follow up on the source records, and mark the runs reviewed."
+          workflows_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=workflows&runIssue=queue_full#recent-runs
+            {{- end -}}
+      - alert: HarborScheduledTaskWorkerMissing
+        expr: |
+          harbor_monitor_task_worker_missing{job="harbor-monitor"} == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor scheduled Tasks are waiting for a full worker"
+          description: "Check the worker service and its startup mode, then review the pending Tasks in Harbor."
+          queue_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=job-queue&queue=pending&jobKind=task
+            {{- end -}}
+      - alert: HarborFullWorkerMissing
+        expr: |
+          harbor_monitor_full_worker_missing{job="harbor-monitor"} == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor has no recent full worker poll"
+          description: "Check the worker service startup mode and confirm a full worker is running."
+      - alert: HarborSegmentScanOverdue
+        expr: |
+          harbor_monitor_segment_scan_overdue{job="harbor-monitor"} == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor segment workflow checks are overdue"
+          description: "Open Workflows to check for retries or a full job queue. Confirm a worker is running with segment scanning enabled."
+          workflows_url: >-
+            {{- if match "^https://[a-zA-Z0-9][a-zA-Z0-9.-]*(:[0-9]{1,5})?$" $labels.harbor_origin -}}
+            {{ $labels.harbor_origin }}/?view=workflows
+            {{- end -}}
+      - alert: HarborMonitorWebIssue
+        expr: |
+          harbor_monitor_web_issue{job="harbor-monitor"} == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor web readiness check failed"
+          description: >-
+            {{- if eq $labels.issue "build_mismatch" -}}
+            Compare the serving build with the expected release and check traffic routing.
+            {{- else if eq $labels.issue "not_ready" -}}
+            Check the web service's database, Google sign-in setup and private storage.
+            {{- else if eq $labels.issue "invalid_origin" -}}
+            Check the Harbor origin configured on the monitor.
+            {{- else if eq $labels.issue "unreachable" -}}
+            Check the web service, DNS and HTTPS connectivity from the monitor.
+            {{- else -}}
+            Check the readiness route and proxy caching.
+            {{- end -}}
+      - alert: HarborMonitorBackupIssue
+        expr: |
+          harbor_monitor_backup_issue{job="harbor-monitor"} == 1
+          and on (job, instance)
+          (harbor:monitor_report_fresh == 1)
+        annotations:
+          summary: "Harbor backup needs attention"
+          description: >-
+            {{- if eq $labels.issue "incompatible_migrations" -}}
+            Verify the dated bundle with a matching Harbor release before restoring.
+            {{- else if eq $labels.issue "integrity_failed" "invalid_bundle" -}}
+            Verify the last good backup before retrying the capture.
+            {{- else if eq $labels.issue "backup_missing" "backup_stale" "capture_failed" -}}
+            Check the backup service and confirm a new capture completes.
+            {{- else if eq $labels.issue "low_free_space" -}}
+            Check available space on the backup volume.
+            {{- else if eq $labels.issue "backup_service_not_reporting" -}}
+            Check that the backup service is running and can write to the backup volume.
+            {{- else if eq $labels.issue "backup_service_poll_failed" -}}
+            Check the backup service logs and confirm the next poll succeeds.
+            {{- else -}}
+            Check backup configuration and run monitor-status for details.
+            {{- end -}}
+      - alert: HarborMonitorMissed
+        expr: |
+          (
+            up{job="harbor-monitor"}
+            unless on (job, instance)
+            (harbor:monitor_report_fresh == 1)
+          )
+          or absent(up{job="harbor-monitor"})
+        annotations:
+          summary: "Harbor has no recent monitoring result"

@@ -1,0 +1,3 @@
+CREATE INDEX "portable_jobs_workspace_history" ON "portable_jobs" USING btree ("workspace_id","created_at","id");--> statement-breakpoint
+CREATE INDEX "portable_jobs_workspace_issues" ON "portable_jobs" USING btree ("workspace_id","created_at","id") WHERE "portable_jobs"."status" IN ('attention','failed');--> statement-breakpoint
+CREATE INDEX "portable_jobs_workspace_pending" ON "portable_jobs" USING btree ("workspace_id","created_at","id") WHERE "portable_jobs"."status" IN ('queued','running','dispatching');

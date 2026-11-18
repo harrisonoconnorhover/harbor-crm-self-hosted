@@ -1,0 +1,1 @@
+ALTER TABLE "portable_lead_inquiries" ADD COLUMN "review_reason" text;

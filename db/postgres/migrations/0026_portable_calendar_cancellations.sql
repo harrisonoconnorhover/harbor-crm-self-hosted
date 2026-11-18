@@ -1,0 +1,3 @@
+ALTER TABLE "portable_calendar_meetings" DROP CONSTRAINT "portable_calendar_meeting_status";--> statement-breakpoint
+ALTER TABLE "portable_calendar_meetings" ADD COLUMN "cancellation_started_at" bigint;--> statement-breakpoint
+ALTER TABLE "portable_calendar_meetings" ADD CONSTRAINT "portable_calendar_meeting_status" CHECK ("portable_calendar_meetings"."status" IN ('submitting','attention','scheduled','cancelling','cancel_attention','cancelled'));

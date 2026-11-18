@@ -1,0 +1,2 @@
+ALTER TABLE "portable_workflow_runs" ADD COLUMN "operator_reviewed_at" bigint;--> statement-breakpoint
+CREATE INDEX "portable_workflow_capacity_review" ON "portable_workflow_runs" USING btree ("workspace_id","created_at","id") WHERE "portable_workflow_runs"."issue"='queue_full' AND "portable_workflow_runs"."operator_reviewed_at" IS NULL;

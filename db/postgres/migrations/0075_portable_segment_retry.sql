@@ -1,0 +1,1 @@
+ALTER TABLE "portable_segment_workflow_scans" ADD COLUMN "retry_at" bigint;

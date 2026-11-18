@@ -1,0 +1,3 @@
+services:
+  worker:
+    command: ["node", "scripts/portable-web.mjs", "worker", "--notes-only"]

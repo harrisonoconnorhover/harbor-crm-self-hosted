@@ -1,0 +1,1 @@
+ALTER TABLE "portable_calendar_reschedules" ADD COLUMN "original_etag" text;

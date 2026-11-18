@@ -1,0 +1,42 @@
+.portable-duplicates > section {
+  inline-size: min(calc(100% - 32px), 70rem);
+  margin-inline: auto;
+}
+
+.portable-duplicates nav[aria-label="Duplicate record type"] a[aria-current="page"] {
+  color: #075e63;
+  font-weight: 600;
+}
+
+.portable-duplicates .portable-duplicate-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  max-inline-size: 45rem;
+}
+
+.portable-duplicate-filters > label:last-of-type { flex: 1 1 15rem; min-inline-size: 0; }
+.portable-duplicate-filters input { inline-size: 100%; min-inline-size: 0; }
+
+.portable-duplicate-pairs {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.portable-duplicate-pairs > li {
+  min-inline-size: 0;
+  padding: 12px;
+  border: 1px solid #dde5e4;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.portable-duplicate-pairs table { margin-block: 10px; table-layout: fixed; }
+.portable-duplicates .portable-duplicate-pairs :is(th, td) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.portable-duplicate-pairs td label { display: block; }

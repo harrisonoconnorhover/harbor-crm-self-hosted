@@ -1,0 +1,1 @@
+ALTER TABLE "portable_worker_heartbeat" ADD COLUMN "last_queue_poll_at" bigint;

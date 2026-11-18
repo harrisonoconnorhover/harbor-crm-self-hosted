@@ -1,0 +1,19 @@
+.portable-contacts .portable-task-search,
+.portable-task-list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.portable-task-search > label { flex: 0 1 24rem; }
+.portable-task-list-filters { margin-block: 12px; }
+.portable-task-list-filters > label { flex: 0 1 12rem; }
+.portable-task-list-filters select { min-inline-size: 0; inline-size: 100%; }
+
+.portable-task-editor { max-inline-size: 60rem; }
+.portable-task-editor > fieldset { align-items: start; min-inline-size: 0; }
+.portable-task-editor > fieldset > :is(label, div) { min-inline-size: 0; max-inline-size: 100%; }
+.portable-task-editor > fieldset > label:first-child { flex: 1 1 15rem; max-inline-size: 24rem; }
+.portable-task-editor :is(label, div) > :is(input:not([type="checkbox"]), select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.portable-contacts .portable-task-repeat-option { display: flex; align-items: center; min-block-size: 32px; }

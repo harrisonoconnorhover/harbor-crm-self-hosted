@@ -1,0 +1,6 @@
+import {base64url,decode64} from './message';
+async function key(encoded:string){const bytes=decode64(encoded);if(bytes.length!==32)throw Error('Email encryption requires a 32-byte key.');return crypto.subtle.importKey('raw',bytes,{name:'AES-GCM'},false,['encrypt','decrypt']);}
+export async function seal(value:string,secret:string,owner:string){const iv=crypto.getRandomValues(new Uint8Array(12));const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode(owner)},await key(secret),new TextEncoder().encode(value));return 'v1.'+base64url(iv)+'.'+base64url(new Uint8Array(ciphertext));}
+export async function unseal(value:string,secret:string,owner:string){const [v,iv,cipher,...rest]=value.split('.');if(v!=='v1'||!iv||!cipher||rest.length)throw Error('Invalid encrypted email credential.');const plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv:decode64(iv),additionalData:new TextEncoder().encode(owner)},await key(secret),decode64(cipher));return new TextDecoder('utf-8',{fatal:true}).decode(plaintext);}
+export async function sha256(value:string){return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))));}
+export function randomSecret(){return base64url(crypto.getRandomValues(new Uint8Array(32)));}

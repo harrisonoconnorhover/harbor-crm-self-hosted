@@ -1,0 +1,4 @@
+ALTER TABLE "portable_file_folders" ADD COLUMN "parent_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_file_folders" ADD CONSTRAINT "portable_file_folder_parent_fk" FOREIGN KEY ("workspace_id","parent_id") REFERENCES "public"."portable_file_folders"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "portable_file_folder_children" ON "portable_file_folders" USING btree ("workspace_id","parent_id","id") WHERE "portable_file_folders"."deleted_at" is null;--> statement-breakpoint
+ALTER TABLE "portable_file_folders" ADD CONSTRAINT "portable_file_folder_distinct_parent" CHECK ("portable_file_folders"."parent_id" <> "portable_file_folders"."id");

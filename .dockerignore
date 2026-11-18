@@ -1,0 +1,33 @@
+# Only build inputs go to the container builder. Runtime secrets are supplied separately.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!next-env.d.ts
+!cloudflare-env.d.ts
+!instrumentation.ts
+!postcss.config.mjs
+!vite.portable.config.ts
+!vite.portable-worker.config.ts
+!app/
+!app/**
+!components/
+!components/**
+!db/
+!db/**
+!hooks/
+!hooks/**
+!lib/
+!lib/**
+!public/
+!public/**
+!runtime/
+!runtime/**
+!scripts/
+!scripts/portable-web.mjs
+!scripts/build-portable.mjs
+# Keep local secret files excluded even inside source directories.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key

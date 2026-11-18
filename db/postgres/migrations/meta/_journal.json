@@ -1,0 +1,839 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1794153835896,
+      "tag": "0000_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794157749008,
+      "tag": "0001_private_contacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794158147266,
+      "tag": "0002_contact_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794158483934,
+      "tag": "0003_durable_contact_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794159969031,
+      "tag": "0004_portable_request_budgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794161806319,
+      "tag": "0005_portable_queue_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794163244732,
+      "tag": "0006_portable_companies",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794163726604,
+      "tag": "0007_portable_primary_company",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794164033348,
+      "tag": "0008_portable_deals",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794164426364,
+      "tag": "0009_portable_workspace_viewers",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794164758734,
+      "tag": "0010_portable_workspace_editors",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794165168577,
+      "tag": "0011_portable_workspace_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794165478890,
+      "tag": "0012_portable_deal_associations",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794165735669,
+      "tag": "0013_portable_shared_contact_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794166105727,
+      "tag": "0014_portable_shared_scheduled_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794166431182,
+      "tag": "0015_portable_deal_pipelines",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794167270096,
+      "tag": "0016_portable_lead_intake",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794167779055,
+      "tag": "0017_portable_worker_heartbeat",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794167990516,
+      "tag": "0018_portable_stage_workflows",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794168483038,
+      "tag": "0019_portable_lifecycle_workflows",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794168901589,
+      "tag": "0020_portable_email_suppression",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794169254949,
+      "tag": "0021_portable_scheduled_gmail",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794170027986,
+      "tag": "0022_portable_job_queue_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794171858481,
+      "tag": "0023_portable_login_callback_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794172199278,
+      "tag": "0024_portable_note_operator_retry",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794173378392,
+      "tag": "0025_portable_calendar_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794174133952,
+      "tag": "0026_portable_calendar_cancellations",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794174457661,
+      "tag": "0027_portable_calendar_receipt_monitor",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794174796622,
+      "tag": "0028_portable_contact_outreach",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794175151010,
+      "tag": "0029_portable_shared_outreach",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794181756327,
+      "tag": "0030_portable_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794182296484,
+      "tag": "0031_portable_task_completion_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794182639829,
+      "tag": "0032_portable_task_related_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794184960077,
+      "tag": "0033_portable_gmail_operator_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794185356951,
+      "tag": "0034_portable_calendar_rejected",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794189197950,
+      "tag": "0035_portable_activity_channels",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794189555098,
+      "tag": "0036_portable_associations",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794189783860,
+      "tag": "0037_portable_saved_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794189802507,
+      "tag": "0038_portable_calendar_reschedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794189942544,
+      "tag": "0039_portable_contact_import_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794190450868,
+      "tag": "0040_portable_leads",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794190465865,
+      "tag": "0041_portable_knowledge_base",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794190495677,
+      "tag": "0042_portable_tickets",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794190733606,
+      "tag": "0043_portable_calendar_original_etag",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794190988926,
+      "tag": "0044_portable_products",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794191218807,
+      "tag": "0045_portable_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1794191263063,
+      "tag": "0046_portable_line_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794191447539,
+      "tag": "0047_portable_custom_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794191461157,
+      "tag": "0048_portable_segments",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794191477985,
+      "tag": "0049_portable_api_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794191780883,
+      "tag": "0050_portable_dashboards",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1794191851697,
+      "tag": "0051_portable_quote_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794192121956,
+      "tag": "0052_portable_manual_workflow_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794192312594,
+      "tag": "0053_portable_shared_saved_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1794192559366,
+      "tag": "0054_portable_task_queues",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1794192768178,
+      "tag": "0055_portable_quote_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1794192796853,
+      "tag": "0056_portable_record_activities",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1794192842032,
+      "tag": "0057_portable_code_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1794193225771,
+      "tag": "0058_portable_invoice_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794193235210,
+      "tag": "0059_portable_activity_mutations",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794193628509,
+      "tag": "0060_portable_manual_note_batches",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1794193629545,
+      "tag": "0061_portable_quote_disposition",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794194029248,
+      "tag": "0062_portable_deal_stage_required_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1794194030846,
+      "tag": "0063_portable_invoice_issue",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1794194270875,
+      "tag": "0064_portable_deal_stage_probability",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794194462749,
+      "tag": "0065_portable_offline_invoice_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794194967773,
+      "tag": "0066_portable_invoice_void",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794195002371,
+      "tag": "0067_portable_contact_archive_visibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794195703398,
+      "tag": "0068_portable_contact_archive_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794196220150,
+      "tag": "0069_portable_task_repeats",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794196773976,
+      "tag": "0070_portable_manual_note_sequence",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1794197382692,
+      "tag": "0071_portable_shared_record_activities",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794197885869,
+      "tag": "0072_portable_backup_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794199656955,
+      "tag": "0073_portable_segment_workflows",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794201345152,
+      "tag": "0074_portable_inquiry_timeline",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794201801325,
+      "tag": "0075_portable_segment_retry",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794203987972,
+      "tag": "0076_portable_activity_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794204606042,
+      "tag": "0077_portable_file_folders",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794205137921,
+      "tag": "0078_portable_nested_file_folders",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1794205647941,
+      "tag": "0079_portable_email_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1794207156346,
+      "tag": "0080_portable_never_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1794208433213,
+      "tag": "0081_portable_gmail_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794209113073,
+      "tag": "0082_portable_property_organizations",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1794209929238,
+      "tag": "0083_portable_static_segments",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794210818759,
+      "tag": "0084_portable_lead_form_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1794212276900,
+      "tag": "0085_portable_form_note_retry",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794213641545,
+      "tag": "0086_portable_saved_view_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794217986594,
+      "tag": "0087_portable_activity_removals",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794220612608,
+      "tag": "0088_portable_ticket_close_sla",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794222445814,
+      "tag": "0089_portable_task_repeat_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794223325055,
+      "tag": "0090_portable_task_repeat_monitor",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1794224027513,
+      "tag": "0091_portable_task_repeat_fairness",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1794225261542,
+      "tag": "0092_portable_task_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1794228553481,
+      "tag": "0093_portable_task_repeat_retry",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1794246247916,
+      "tag": "0094_portable_gmail_worker_poll",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1794248171199,
+      "tag": "0095_portable_inquiry_review_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1794284367048,
+      "tag": "0096_portable_inquiry_follow_up",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1794303118235,
+      "tag": "0097_portable_published_availability",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1794304255909,
+      "tag": "0098_portable_guest_booking_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1794362369106,
+      "tag": "0099_portable_workflow_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1794400851196,
+      "tag": "0100_portable_guest_booking_status_receipt",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1794424672108,
+      "tag": "0101_portable_company_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1794426424844,
+      "tag": "0102_portable_deal_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1794514038125,
+      "tag": "0103_portable_company_merge",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1794517161425,
+      "tag": "0104_portable_contact_merge",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1794518563009,
+      "tag": "0105_portable_duplicate_dismissals",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1794519196461,
+      "tag": "0106_portable_contact_file_storage_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1794521084081,
+      "tag": "0107_portable_knowledge_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1794522238056,
+      "tag": "0108_portable_member_saved_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1794582260436,
+      "tag": "0109_portable_lead_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1794642240281,
+      "tag": "0110_portable_full_worker_poll",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1794701219730,
+      "tag": "0111_portable_google_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1794704219907,
+      "tag": "0112_portable_lead_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1794707003391,
+      "tag": "0113_portable_invitation_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1794769894660,
+      "tag": "0114_portable_form_note_workspace_fairness",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1794772355584,
+      "tag": "0115_portable_worker_queue_poll",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1794810163761,
+      "tag": "0116_portable_segment_scan_cycle_due",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1794823490839,
+      "tag": "0117_portable_workflow_capacity_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1794998653876,
+      "tag": "0118_portable_team_access_dashboards_reminders",
+      "breakpoints": true
+    }
+  ]
+}

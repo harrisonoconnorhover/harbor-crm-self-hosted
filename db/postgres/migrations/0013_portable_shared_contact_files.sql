@@ -1,0 +1,3 @@
+ALTER TABLE "contact_file_versions" ADD COLUMN "actor_id" text;--> statement-breakpoint
+ALTER TABLE "portable_workspace_viewers" ADD COLUMN "contact_files" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "contact_file_versions" ADD CONSTRAINT "contact_file_versions_actor_id_login_identities_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."login_identities"("id") ON DELETE no action ON UPDATE no action;

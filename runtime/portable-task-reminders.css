@@ -1,0 +1,79 @@
+.portable-reminder-control { position: relative; flex: none; }
+.portable-contacts .portable-reminder-control .portable-reminder-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 5px 8px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--portable-chrome-border);
+  border-radius: 6px;
+}
+.portable-reminder-toggle span {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #f1ce80;
+  color: #352914;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.portable-reminder-panel,.portable-reminder-toast {
+  z-index: 40;
+  width: min(21rem,calc(100vw - 24px));
+  padding: 14px;
+  color: #233a3c;
+  background: #fff;
+  border: 1px solid #cbdad6;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px #14372e24;
+  white-space: normal;
+}
+.portable-reminder-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+.portable-reminder-panel h2 { margin: 0; font-size: 1rem; font-weight: 650; }
+.portable-reminder-panel p { margin: 10px 0 0; color: #43595c; }
+.portable-reminder-panel ul { padding: 0; margin: 6px 0 0; list-style: none; }
+.portable-reminder-panel li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
+.portable-reminder-panel li + li { border-top: 1px solid #e4ece9; }
+.portable-contacts .portable-crm-account .portable-reminder-control a {
+  display: block;
+  padding: 0;
+  color: #075e63;
+  border: 0;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.portable-reminder-control small { display: block; color: #516669; margin-top: 3px; }
+.portable-reminder-panel button,.portable-reminder-toast button { font-size: .8rem; }
+.portable-reminder-toast {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: start;
+  gap: 8px;
+  border-inline-start: 3px solid #157570;
+}
+.portable-reminder-toast strong { display: block; margin-bottom: 6px; }
+.portable-contacts .portable-reminder-control .portable-reminder-hide,
+.portable-contacts .portable-reminder-control .portable-reminder-dismiss {
+  padding: 3px 5px;
+  min-height: 0;
+  background: transparent;
+  color: #365959;
+  border: 0;
+}
+.portable-contacts .portable-reminder-control .portable-reminder-dismiss { justify-self: start; padding: 0; text-decoration: underline; }
+@media (max-width: 42rem) {
+  .portable-reminder-panel { position: fixed; inset: 3.25rem 12px auto auto; }
+}
