@@ -33,6 +33,21 @@ docker compose -f compose.portable.yaml run --rm web node scripts/portable-web.m
 
 The first command checks the Compose file without printing its secrets. Migration creates the tables. If the web account cannot create tables, set the migration role’s `DATABASE_URL` in your shell and use `docker compose -f compose.portable.yaml run --rm -e DATABASE_URL web node scripts/portable-web.mjs migrate`. Keep the normal web role in the file. Continue when the doctor reports `ready_for_google_setup`. It checks the database and bucket and prints `googleCallbackUrl`.
 
+### If your provider uses an internal certificate authority
+
+Place the CA's public PEM certificate in `.harbor/compose/company-ca.pem`. It must be readable by the container's `node` user. Save this override as `.harbor/compose/trust.yaml` and add `-f .harbor/compose/trust.yaml` after the base Compose file whenever running a Compose command for this installation. Apply the same mount and settings to workers or backup jobs that connect to the same provider.
+
+```yaml
+services:
+  web:
+    volumes:
+      - ./.harbor/compose/company-ca.pem:/run/harbor/company-ca.pem:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/harbor/company-ca.pem
+```
+
+For PostgreSQL with this CA, set `sslmode=verify-full` in the database URL and `PGSSLROOTCERT=/run/harbor/company-ca.pem` for its command-line tools.
+
 ## 2. Sign in and invite a teammate
 
 Register that exact callback as an authorized redirect URI for your Google web client. In `web.env`, enter its client ID and secret, then set `HARBOR_LOGIN_ALLOWED_EMAILS` to the two Google email addresses separated by a comma. If your Google app is in testing, include both accounts as test users.
@@ -56,6 +71,16 @@ Expect `ready`, then open your **public HTTPS address** and choose **Continue wi
 - For a timed task, choose a reminder and open the reminder tray as its assignee. Reminders appear inside Harbor.
 
 The workspace limit is **25 active teammates and pending invitations combined**. Rehearse with your own expected record counts and number of simultaneous users.
+
+### Check that files are private
+
+Upload a nonempty fictional attachment and copy its exact object key from the bucket's management console. Run this with that key:
+
+```sh
+docker compose -f compose.portable.yaml run --rm web node scripts/portable-web.mjs doctor web --check-file-privacy 'your-fictional-object-key'
+```
+
+Look for `"filePrivacy": "ok"`: Harbor confirmed the object exists using its own credentials, then the bucket denied an anonymous read. Repeat the anonymous read on any public alias or CDN configured for the bucket. An unsigned request for that existing file should receive HTTP 401 or 403.
 
 ## Optional Notes worker
 
