@@ -10,7 +10,7 @@ import {portableDb} from './portable-db';
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'cache-control':'private, no-store'}});
 const viewQuery=z.object({kind:portableRecordKind,workspaceId:z.string().guid("Invalid uuid").optional()}).strict();
 const errors={
-  columns:{message:'Choose table columns from this workspace and record type.',status:400},
+  columns:{message:'Choose filters and columns available to you for this record type.',status:400},
   missing:{message:'Saved view not found.',status:404},
   stale:{message:'This view changed. Reload it before saving.',status:409},
   duplicate:{message:'A saved view with that name already exists for these records.',status:409},

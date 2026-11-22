@@ -1,14 +1,15 @@
 'use client';
 
+import {WorkspaceDate} from './portable-workspace-format';
 import {useEffect,useState} from 'react';
 import type {PortableTaskCompletionPage} from '../lib/portable-tasks';
 
-export function PortableTaskHistory({contactId,workspaceId}:{contactId:string;workspaceId?:string}){
+export function PortableTaskHistory({kind,recordId,workspaceId}:{kind:'contacts'|'deals';recordId:string;workspaceId?:string}){
   const [page,setPage]=useState<PortableTaskCompletionPage>();
   const [cursor,setCursor]=useState<PortableTaskCompletionPage['next']>(null);
   const [failed,setFailed]=useState(false);
   const [retry,setRetry]=useState(0);
-  const query=new URLSearchParams({kind:'tasks',completionHistoryFor:contactId});
+  const query=new URLSearchParams({kind:'tasks',completionHistoryFor:recordId,recordKind:kind});
   if(workspaceId)query.set('workspaceId',workspaceId);
   if(cursor){
     query.set('afterAt',cursor.at);
@@ -33,7 +34,7 @@ export function PortableTaskHistory({contactId,workspaceId}:{contactId:string;wo
     setCursor(next);
   }
 
-  return <section aria-label="Task completion history">
+  return <section aria-label="Task completion history" id="portable-task-history" className="portable-record-panel" tabIndex={-1}>
     <h2>Task completion history</h2>
     {failed?<p role="alert">Could not load task history. <button type="button" onClick={()=>setRetry(value=>value+1)}>Retry</button></p>:
       !page?<p>Loading task history…</p>:page.items.length===0?<p>No task completions on this page.</p>:
@@ -42,7 +43,7 @@ export function PortableTaskHistory({contactId,workspaceId}:{contactId:string;wo
         if(workspaceId)link.set('workspaceId',workspaceId);
         return <li key={item.id+':'+item.revision}>
           <a href={'/?'+link}>{item.name}</a> · Completed{item.actorName?' by '+item.actorName:''} ·{' '}
-          <time dateTime={item.occurredAt}>{new Date(item.occurredAt).toLocaleString()}</time>
+          <time dateTime={item.occurredAt}><WorkspaceDate value={item.occurredAt}>{new Date(item.occurredAt).toLocaleString()}</WorkspaceDate></time>
         </li>;
       })}</ul>}
     {cursor&&<button type="button" onClick={()=>open(null)}>Newest completions</button>}{' '}

@@ -1,11 +1,13 @@
 'use client';
-
+import {WorkspaceNumber} from './portable-workspace-format';
+import {WorkspaceDate} from './portable-workspace-format';
 import {useState} from 'react';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {portableRecycleBinLink} from './portable-contact-recycle-ui';
 import {InvoiceAction,InvoiceDocument,InvoiceEditor} from '../app/invoices';
 import {formatCents} from '../lib/commerce';
+import type {StripeInvoiceSummary} from './portable-stripe-invoice';
 import {invoiceBalance,invoiceLabel,invoiceStatus,invoiceStatusLabels,paymentLabels,type InvoiceData,type InvoicePayment} from '../lib/invoices';
 import type {PortableInvoiceDetail,PortableInvoicePreview,PortableInvoiceSourceQuery} from '../lib/portable-invoices';
 
@@ -74,17 +76,50 @@ export function PortableInvoiceCreate({source,sourceId}:Pick<PortableInvoiceSour
       </select>
     </label>
     {review&&<div>
-      <p>{review.preview.sourceNote} Draft total <strong>{formatCents(review.preview.totalCents)} USD</strong></p>
-      <ul>{review.preview.data.items.map(item=><li key={item.id}>{item.name} · {item.quantity} × {formatCents(item.unitPriceCents)}</li>)}</ul>
+      <p>{review.preview.sourceNote} Draft total <strong><WorkspaceNumber kind="usd" value={review.preview.totalCents/100}>{formatCents(review.preview.totalCents)}</WorkspaceNumber> USD</strong></p>
+      <ul>{review.preview.data.items.map(item=><li key={item.id}>{item.name} · {item.quantity} × <WorkspaceNumber kind="usd" value={item.unitPriceCents/100}>{formatCents(item.unitPriceCents)}</WorkspaceNumber></li>)}</ul>
       <button type="button" disabled={busy} onClick={()=>{setReview(undefined);setError('');}}>Refresh source</button>{' '}
     </div>}
     <button type="button" disabled={busy} onClick={()=>void perform()}>{review?'Create invoice draft':'Review invoice draft'}</button>{' '}
-    <Link href={page+'&'+(source==='deal'?'dealId':'quoteId')+'='+sourceId}>View invoices</Link>
+    <a href={page+'&'+(source==='deal'?'dealId':'quoteId')+'='+sourceId}>View invoices</a>
     {error&&<p role="alert">{error}</p>}
   </section>;
 }
 
-export function PortableInvoiceDetailView({detail,dealArchived,before,paymentsBefore}:{detail:PortableInvoiceDetail;dealArchived:boolean;
+function StripeInvoice({id,workspaceId}:{id:string;workspaceId:string}){
+  const [result,setResult]=useState<StripeInvoiceSummary|null>(),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [copyMessage,setCopyMessage]=useState('');
+  async function copyPaymentPage(){
+    if(!result?.page||result.status!=='open')return;
+    try{
+      await navigator.clipboard.writeText(result.page);
+      setCopyMessage('Payment link copied.');
+    }catch{
+      setCopyMessage('Use the payment link’s context menu to copy its address.');
+    }
+  }
+  async function check(){
+    setBusy(true);setError('');setCopyMessage('');setResult(undefined);
+    try{
+      const data=await request<{invoice:StripeInvoiceSummary|null}>(endpoint+'?view=stripe&id='+id);
+      setResult(data.invoice);
+    }catch(cause){setError(cause instanceof Error?cause.message:'Could not check Stripe.');}
+    finally{setBusy(false);}
+  }
+  return <section aria-label="Stripe invoice"><h3>Stripe invoice</h3>
+    <button type="button" disabled={busy} onClick={check}>{busy?'Checking Stripe…':'Check Stripe invoice'}</button>
+    {error&&<p role="alert">{error}</p>}
+    {result===null&&<p role="status">No match yet. On the Stripe invoice, set metadata <code>harbor_workspace_id</code> to {workspaceId} and <code>harbor_invoice_id</code> to {id}. Check again after Stripe indexes the change.</p>}
+    {result&&<><p role="status">Stripe {result.mode} mode · {result.status} · <WorkspaceNumber kind="usd" value={result.paid/100}>{formatCents(result.paid)}</WorkspaceNumber> USD paid · <WorkspaceNumber kind="usd" value={result.remaining/100}>{formatCents(result.remaining)}</WorkspaceNumber> USD remaining</p>
+      {result.page?<a href={result.page} target="_blank" rel="noreferrer">{result.status==='paid'?'View paid invoice on Stripe':'Open Stripe payment page'}</a>:
+        result.status==='open'&&<p>Check the balances and hosted invoice page in Stripe before sharing a payment link.</p>}
+      {result.page&&result.status==='open'&&<> <button type="button" onClick={()=>void copyPaymentPage()}>Copy payment link</button>
+        <span role="status">{copyMessage}</span></>}
+      <p>Harbor tracks manually recorded payments separately.</p></>}
+  </section>;
+}
+
+export function PortableInvoiceDetailView({detail,dealArchived,before,paymentsBefore,stripeWorkspace}:{detail:PortableInvoiceDetail;dealArchived:boolean;stripeWorkspace?:string;
   before?:number;paymentsBefore?:number}){
   const router=useRouter();
   const [editing,setEditing]=useState(false);
@@ -129,11 +164,11 @@ export function PortableInvoiceDetailView({detail,dealArchived,before,paymentsBe
     }finally{setBusy(false);}
   }
   return <section className="commerce-page quote-page">
-    <Link href={page}>Back to invoices</Link>{' '}
+    <a href={page}>Back to invoices</a>{' '}
     {invoice.dealId&&<Link href={dealArchived?portableRecycleBinLink('deals'):'/?kind=deals&record='+invoice.dealId}>
       {invoice.dealName}{dealArchived?' (archived)':''}
     </Link>}{' '}
-    {invoice.quoteId&&<Link href={'/quotes?id='+invoice.quoteId+'&version='+invoice.quoteVersion}>Source quote version {invoice.quoteVersion}</Link>}
+    {invoice.quoteId&&<a href={'/quotes?id='+invoice.quoteId+'&version='+invoice.quoteVersion}>Source quote version {invoice.quoteVersion}</a>}
     <div className="portable-contacts-heading">
       <h2>{invoice.data.title}</h2>
       {draft?<>
@@ -148,13 +183,14 @@ export function PortableInvoiceDetailView({detail,dealArchived,before,paymentsBe
     <p>{invoice.sourceNote}</p>
     {error&&<p role="alert">{error}</p>}
     <InvoiceDocument invoice={invoice} privateOnly/>
+    {stripeWorkspace&&<StripeInvoice key={invoice.revision} id={invoice.id} workspaceId={stripeWorkspace}/>}
     {invoice.finalizedAt&&<section aria-label="Offline payments">
       <h3>Offline payments</h3>
       <p>Record money already received outside Harbor.</p>
-      <p>Recorded {formatCents(invoice.paidCents)} USD · Balance {formatCents(balance)} USD</p>
+      <p>Recorded <WorkspaceNumber kind="usd" value={invoice.paidCents/100}>{formatCents(invoice.paidCents)}</WorkspaceNumber> USD · Balance <WorkspaceNumber kind="usd" value={balance/100}>{formatCents(balance)}</WorkspaceNumber> USD</p>
       {invoice.status==='open'&&balance>0&&<button type="button" disabled={busy} onClick={()=>setAction('payment')}>Record offline payment</button>}
       {payments.length?<ul>{payments.map(payment=><li key={payment.id}>
-        <strong>{formatCents(payment.amountCents)} USD</strong> · {payment.receivedOn} · {paymentLabels[payment.method]}
+        <strong><WorkspaceNumber kind="usd" value={payment.amountCents/100}>{formatCents(payment.amountCents)}</WorkspaceNumber> USD</strong> · {payment.receivedOn} · {paymentLabels[payment.method]}
         {payment.reference&&<p>Reference {payment.reference}</p>}
         {payment.note&&<p>{payment.note}</p>}
         {payment.unappliedAt?<p>Unapplied · {payment.unapplyReason}</p>:
@@ -162,14 +198,14 @@ export function PortableInvoiceDetailView({detail,dealArchived,before,paymentsBe
             Unapply payment
           </button>}
       </li>)}</ul>:<p>No offline payments recorded on this page.</p>}
-      {paymentsBefore&&<Link href={current(before)}>Latest payments</Link>}{' '}
-      {detail.nextPayment&&<Link href={current(before,detail.nextPayment)}>Older payments</Link>}
+      {paymentsBefore&&<a href={current(before)}>Latest payments</a>}{' '}
+      {detail.nextPayment&&<a href={current(before,detail.nextPayment)}>Older payments</a>}
     </section>}
     <h3>Invoice history</h3>
     <ol>{history.map(item=><li key={item.revision}>{{create:'Created',save:'Saved',finalize:'Finalized',payment:'Payment recorded',unapply:'Payment unapplied',void:'Voided'}[item.action]} · {item.actorName??'Workspace owner'} ·{' '}
-      <time dateTime={item.at}>{new Date(item.at).toLocaleString()}</time>{item.note&&<p>{item.note}</p>}</li>)}</ol>
-    {before&&<Link href={current(undefined,paymentsBefore)}>Latest changes</Link>}{' '}
-    {detail.next&&<Link href={current(detail.next,paymentsBefore)}>Older changes</Link>}
+      <time dateTime={item.at}><WorkspaceDate value={item.at}>{new Date(item.at).toLocaleString()}</WorkspaceDate></time>{item.note&&<p>{item.note}</p>}</li>)}</ol>
+    {before&&<a href={current(undefined,paymentsBefore)}>Latest changes</a>}{' '}
+    {detail.next&&<a href={current(detail.next,paymentsBefore)}>Older changes</a>}
     {action&&<InvoiceAction action={action} invoice={invoice} payment={selectedPayment} busy={busy}
       onClose={closeAction} onSubmit={recordAction}/>}
     {editing&&draft&&<InvoiceEditor invoice={invoice} draftOnly busy={busy} onClose={()=>setEditing(false)} onSave={save}/>}

@@ -1,0 +1,1 @@
+ALTER TABLE "portable_leads" ADD COLUMN "intake_country" varchar(100);

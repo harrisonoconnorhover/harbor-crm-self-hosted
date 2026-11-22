@@ -1,5 +1,9 @@
+import {sharedToolAllowed} from './shared-tool-permission';
+import {recordCatalogScope,sharedWorkspaceGrant} from './workspace-viewer-store';
+import {sharedCoreRecordScope} from './record-ownership-scope';
+import {visibleRecordData} from './record-property-access';
 import {activeContact} from './contact-visibility';
-import {and,asc,eq,exists,gt,ilike,inArray,isNotNull,notExists,or,sql} from 'drizzle-orm';
+import {and,asc,eq,exists,gt,ilike,inArray,isNotNull,notExists,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {digest} from '../../lib/api-access';
 import type {PortableSegment,PortableSegmentList,PortableSegmentMembers,PortableSegmentMembershipReceipt,
@@ -7,48 +11,52 @@ import type {PortableSegment,PortableSegmentList,PortableSegmentMembers,Portable
 import {contacts} from './contact-schema';
 import {portableSegmentMembers as members,portableSegmentMembershipReceipts as receipts,portableSegments as segments} from './portable-segment-schema';
 import {lockRecordWorkspace} from './private-workspace-store';
-import {recordSearchPattern} from './record-search';
+import {recordAccess,type RecordAccessActor} from './record-access-store';
+import {matchesContactNameOrEmail,recordSearchPattern} from './record-search';
 import {portableSegmentMatch} from './portable-segment-match';
 import {dealWorkflows,segmentWorkflowScans as scans} from './workflow-schema';
 import {privateWorkspaces} from './workspace-schema';
 
-const fields={id:segments.id,name:segments.name,description:segments.description,revision:segments.revision,
+const fields={id:segments.id,shared:segments.shared,name:segments.name,description:segments.description,revision:segments.revision,
   mode:segments.mode,criteria:segments.criteria,createdAt:segments.createdAt,updatedAt:segments.updatedAt};
 const contactSegment=(row:Omit<PortableSegment,'kind'>):PortableSegment=>({...row,kind:'contacts'});
-const contactName=sql<string>`${contacts.data}->>'name'`;
-const contactEmail=sql<string>`coalesce(${contacts.data}->>'email','')`;
 const memberScope=(workspaceId:string,segmentId:string)=>and(eq(members.workspaceId,workspaceId),eq(members.segmentId,segmentId));
 
-export async function readPortableSegments(db:PostgresJsDatabase,actorId:string,query:PortableSegmentRead):Promise<PortableSegmentList|PortableSegmentMembers|null>{
-  const owner=eq(privateWorkspaces.ownerId,actorId);
+export async function readPortableSegments(db:PostgresJsDatabase,actor:RecordAccessActor,query:PortableSegmentRead,includeBody=true):Promise<PortableSegmentList|PortableSegmentMembers|null>{
+  const shared=query.workspaceId;
+  if(shared&&(('candidates' in query&&query.candidates)||!await sharedToolAllowed(db,actor.userId,shared,'segments')||!await sharedWorkspaceGrant(db,actor.userId,shared,true)))return null;
+  const allowed=and(recordCatalogScope(db,actor.userId,shared),shared?eq(segments.shared,true):undefined);
   const pattern=recordSearchPattern(query.q);
   if('id' in query){
     // Use the same snapshot for the definition, total and cursor page.
     return db.transaction(async tx=>{
       const [saved]=await tx.select({...fields,workspaceId:segments.workspaceId}).from(segments)
         .innerJoin(privateWorkspaces,eq(segments.workspaceId,privateWorkspaces.id))
-        .where(and(owner,eq(segments.id,query.id))).limit(1);
+        .where(and(allowed,eq(segments.id,query.id))).limit(1);
       if(!saved)return null;
       const {workspaceId,...row}=saved;
       const segment=contactSegment(row);
       if(query.candidates&&segment.mode!=='static')return null;
       const membership=tx.select({id:members.contactId}).from(members)
         .where(and(memberScope(workspaceId,segment.id),eq(members.contactId,contacts.id)));
-      const audience=segment.mode==='active'?portableSegmentMatch(contacts.data,segment.criteria):
+      const data=shared?visibleRecordData(contacts.data,workspaceId,'contacts',actor.userId):contacts.data;
+      const audience=segment.mode==='active'?portableSegmentMatch(contacts.data,segment.criteria,shared?data:undefined):
         query.candidates?notExists(membership):exists(membership);
       const scope=and(eq(contacts.workspaceId,workspaceId),activeContact,audience,
-        pattern?or(ilike(contactName,pattern),ilike(contactEmail,pattern)):undefined);
+        sharedCoreRecordScope(tx,actor.userId,shared,contacts),matchesContactNameOrEmail(contacts.data,pattern),
+        shared?matchesContactNameOrEmail(data,pattern):undefined);
       const [count]=await tx.select({total:sql<string>`count(*)::text`}).from(contacts).where(scope);
-      const rows=await tx.select({id:contacts.id,name:contactName,
-        email:contactEmail,lifecycle:sql<string|null>`${contacts.data}->>'lifecycle'`})
+      const rows=await tx.select({id:contacts.id,name:sql<string>`${data}->>'name'`,
+        email:sql<string>`coalesce(${data}->>'email','')`,lifecycle:sql<string|null>`${data}->>'lifecycle'`})
         .from(contacts).where(and(scope,query.after?gt(contacts.id,query.after):undefined))
         .orderBy(asc(contacts.id)).limit(query.limit+1);
       const items=rows.slice(0,query.limit);
-      return {segment,items,total:count.total,next:rows.length>query.limit?items.at(-1)!.id:null};
-    },{isolationLevel:'repeatable read',accessMode:'read only'});
+      if(includeBody)await recordAccess(tx,actor,'contacts',pattern?'search':'list',items.map(contact=>contact.id),workspaceId);
+      return {workspaceId,segment,items,total:count.total,next:rows.length>query.limit?items.at(-1)!.id:null};
+    },{isolationLevel:'repeatable read',accessMode:includeBody?'read write':'read only'});
   }
   const rows=await db.select(fields).from(segments).innerJoin(privateWorkspaces,eq(segments.workspaceId,privateWorkspaces.id))
-    .where(and(owner,query.activeOnly?eq(segments.mode,'active'):undefined,
+    .where(and(allowed,query.activeOnly?eq(segments.mode,'active'):undefined,
       pattern?ilike(segments.name,pattern):undefined,query.after?gt(segments.id,query.after):undefined))
     .orderBy(asc(segments.id)).limit(query.limit+1);
   const page=rows.slice(0,query.limit);
@@ -103,6 +111,10 @@ export function writePortableSegment(db:PostgresJsDatabase,actorId:string,input:
     if(!current&&!creating)return {error:'missing'};
     const revision=input.action==='save'?input.segment.revision:input.revision;
     if(current&&current.revision!==revision)return {error:'stale'};
+    if(input.action==='share'){
+      await tx.update(segments).set({shared:input.shared}).where(scope);
+      return {ok:true};
+    }
     if(input.action==='delete'){
       const [workflow]=await tx.select({id:dealWorkflows.id}).from(dealWorkflows).where(and(
         eq(dealWorkflows.workspaceId,workspaceId),sql`${dealWorkflows.definition}->>'segmentId'=${id}`)).limit(1);

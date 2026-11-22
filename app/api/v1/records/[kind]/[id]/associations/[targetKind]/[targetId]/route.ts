@@ -1,0 +1,1 @@
+export const dynamic="force-dynamic"; export {externalAssociations as GET,externalAssociations as PUT,externalAssociations as DELETE} from "../../../../../../../../../runtime/portable-external-record-routes";

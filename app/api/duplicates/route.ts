@@ -1,1 +1,1 @@
-export const dynamic="force-dynamic"; export {GET,POST} from "../../../runtime/portable-duplicate-routes";
+export const dynamic="force-dynamic"; export {GET,HEAD,POST} from "../../../runtime/portable-duplicate-routes";

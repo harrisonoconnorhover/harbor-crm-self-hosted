@@ -1,10 +1,12 @@
-import {and,eq} from 'drizzle-orm';
+import {hiddenStandardFields} from './standard-property-access';
+import {and,eq,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {ApiError} from '../../lib/api-error';
 import {portablePropertyGroupFields,type PortableCustomPropertyKind,type PortablePropertyGroupWrite} from '../../lib/portable-custom-properties';
 import {changePropertyOrganization,normalizePropertyOrganization,type PropertyGroupState,type PropertyOrganization} from '../../lib/property-groups';
 import {portableCustomProperties as properties,portablePropertyOrganizations as organizations} from './custom-property-schema';
 import {lockRecordWorkspace} from './private-workspace-store';
+import {recordCatalogScope} from './workspace-viewer-store';
 import {privateWorkspaces} from './workspace-schema';
 
 const empty:PropertyOrganization={groups:[],assignments:{}};
@@ -12,10 +14,12 @@ const columns={revision:organizations.revision,config:organizations.config};
 const state=(kind:PortableCustomPropertyKind,row?:{revision:number;config:PropertyOrganization}):PropertyGroupState=>
   ({kind,revision:row?.revision??0,...(row?.config??empty)});
 
-export async function readPortablePropertyGroups(db:PostgresJsDatabase,ownerId:string,kind:PortableCustomPropertyKind){
-  const [row]=await db.select(columns).from(organizations)
+export async function readPortablePropertyGroups(db:PostgresJsDatabase,actorId:string,kind:PortableCustomPropertyKind,workspaceId?:string){
+  const config=workspaceId?sql<PropertyOrganization>`jsonb_set(${organizations.config},'{assignments}',
+    coalesce(${organizations.config}->'assignments','{}'::jsonb) - ARRAY(${hiddenStandardFields(workspaceId,kind,actorId)}))`:organizations.config;
+  const [row]=await db.select({revision:organizations.revision,config}).from(organizations)
     .innerJoin(privateWorkspaces,eq(organizations.workspaceId,privateWorkspaces.id))
-    .where(and(eq(privateWorkspaces.ownerId,ownerId),eq(organizations.kind,kind)));
+    .where(and(recordCatalogScope(db,actorId,workspaceId),eq(organizations.kind,kind)));
   return state(kind,row);
 }
 

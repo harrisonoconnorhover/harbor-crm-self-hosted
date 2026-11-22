@@ -24,9 +24,9 @@ function BulkDateTimeValue(){
 // Owner assignment is one all-or-nothing request. Archive runs one record at a
 // time, like native Harbor, and stops at the first failure so the confirmed
 // prefix is clear. Each record keeps its request ID so a retry replays it.
-export function PortableRecordBulkBar({kind,selected,assignees,properties,scope,disabled,onBusy,onClear,onDone}:{
+export function PortableRecordBulkBar({kind,selected,assignees,properties,scope,limitedEdit=false,canMerge=true,canDelete=true,disabled,onBusy,onClear,onDone}:{
   kind:PortableRecordKind;selected:PortableBulkSelection;assignees:{id:string;label:string}[];properties:PortableBulkProperty[];scope?:PortableRecycleScope;
-  disabled?:boolean;onBusy:(busy:boolean)=>void;onClear:()=>void;
+  limitedEdit?:boolean;canMerge?:boolean;canDelete?:boolean;disabled?:boolean;onBusy:(busy:boolean)=>void;onClear:()=>void;
   // keep lists records that should stay selected, e.g. those not yet archived after a stop.
   onDone:(message:string,keep?:string[])=>void;
 }){
@@ -134,7 +134,7 @@ export function PortableRecordBulkBar({kind,selected,assignees,properties,scope,
       <form onSubmit={assign} aria-label={'Assign an owner to selected '+plural}>
         <fieldset disabled={disabled}>
           <label>Record owner <select value={assignee} onChange={event=>setAssignee(event.target.value)}>
-            <option value="">Choose an owner</option><option value={UNASSIGNED}>Unassigned</option>
+            <option value="">Choose an owner</option>{!limitedEdit&&<option value={UNASSIGNED}>Unassigned</option>}
             {assignees.map(choice=><option key={choice.id} value={choice.id}>{choice.label}</option>)}
           </select></label>
           <button type="submit" disabled={!assignee}>Assign owner</button>
@@ -163,16 +163,16 @@ export function PortableRecordBulkBar({kind,selected,assignees,properties,scope,
         </fieldset>
       </form>
     </div>
-    {kind!=='deals'&&selected.size===2&&<PortableRecordMerge key={[...selected.keys()].join(':')} kind={kind} scope={scope} disabled={disabled} onBusy={onBusy}
+    {canMerge&&canDelete&&!limitedEdit&&kind!=='deals'&&selected.size===2&&<PortableRecordMerge key={[...selected.keys()].join(':')} kind={kind} scope={scope} disabled={disabled} onBusy={onBusy}
       records={[...selected].map(([id,{name}])=>({id,name}))} onDone={message=>{archiveRequests.current.clear();onDone(message);}}
       labels={{name:{label:'Name'},domain:{label:'Domain'},email:{label:'Email'},recordOwner:{label:kind==='contacts'?'Contact owner':'Company owner'},
         primaryCompanyId:{label:'Primary company'},
         ...Object.fromEntries(properties.map(choice=>[choice.id,{label:choice.label,optionLabels:choice.optionLabels}]))}}/>}
-    {confirming?<div>
+    {canDelete&&(confirming?<div>
       <p>Archive {selected.size} selected {selected.size===1?'record':plural}? They will be hidden from active views and can be restored from the Recycle Bin.</p>
       <button type="button" disabled={disabled} onClick={archive}>{error?'Retry archive':'Confirm archive'}</button>{' '}
       <button type="button" disabled={disabled} onClick={()=>{setConfirming(false);setError('');}}>Keep records</button>
-    </div>:<button type="button" disabled={disabled} onClick={()=>setConfirming(true)}>Archive selected</button>}{' '}
+    </div>:<button type="button" disabled={disabled} onClick={()=>setConfirming(true)}>Archive selected</button>)}{' '}
     <button type="button" disabled={disabled} onClick={()=>{archiveRequests.current.clear();setError('');setConfirming(false);onClear();}}>Clear selection</button>
     {progress&&<p role="status">{progress}</p>}
     {error&&<p role="alert">{error}</p>}

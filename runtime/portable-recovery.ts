@@ -146,9 +146,11 @@ const committedFileKey = `'contact-files/' || workspace_id || '/' ||
 
 const omittedPublicTableData=[
   'login_sessions','portable_google_attempts','portable_google_grants','portable_request_budgets',
-  'portable_workspace_viewers','portable_api_tokens','portable_workspace_invites','portable_lead_form_activations',
-  'portable_published_availability','portable_guest_booking_requests','portable_worker_heartbeat',
-  'portable_workflow_activations','portable_backup_source','portable_segment_workflow_scans','portable_segment_workflow_members',
+  'portable_workspace_viewers','portable_directory_groups','portable_directory_group_members','portable_lead_routing_members','portable_api_tokens','portable_workspace_invites','portable_lead_form_activations',
+  'portable_quote_signing_links','portable_case_access','portable_case_publications','portable_landing_publications','portable_help_centers','portable_article_publications','portable_team_availability','portable_team_calendars','portable_published_availability','portable_guest_booking_requests','portable_worker_heartbeat',
+  'portable_marketing_campaign_activations','portable_marketing_form_routes',
+  'portable_webhook_subscriptions','portable_webhook_deliveries',
+  'portable_sales_sequence_activations','portable_workflow_activations','portable_backup_source','portable_segment_workflow_scans','portable_segment_workflow_members',
 ];
 
 async function backupReadPermissions(db:Sql,databaseMajor:number){
@@ -669,6 +671,23 @@ BEGIN
   IF to_regclass('public.portable_calendar_meetings') IS NOT NULL THEN
     UPDATE public.portable_calendar_meetings SET status='attention' WHERE status='submitting';
     UPDATE public.portable_calendar_meetings SET status='cancel_attention' WHERE status='cancelling';
+  END IF;
+  -- An enrollment may have advanced after capture. Keep its history for inspection.
+  IF to_regclass('public.portable_sales_enrollments') IS NOT NULL THEN
+    UPDATE public.portable_sales_sequence_steps s SET state='stopped'
+      FROM public.portable_sales_enrollments e
+      WHERE (s.workspace_id,s.enrollment_id)=(e.workspace_id,e.id) AND e.state='active'
+        AND s.state IN ('ready','waiting','queued');
+    UPDATE public.portable_sales_enrollments SET state='stopped',
+      finished_at=floor(extract(epoch from clock_timestamp())*1000)::bigint, issue='restore_requires_reconciliation'
+      WHERE state='active';
+  END IF;
+  IF to_regclass('public.portable_tracking_sites') IS NOT NULL THEN
+    UPDATE public.portable_tracking_sites SET enabled=false,revision=revision+1 WHERE enabled;
+  END IF;
+  -- A web process from the source installation could have sent this reply after capture.
+  IF to_regclass('public.portable_inbox_messages') IS NOT NULL THEN
+    UPDATE public.portable_inbox_messages SET state='uncertain' WHERE state='sending';
   END IF;
   IF to_regclass('public.portable_calendar_reschedules') IS NOT NULL THEN
     UPDATE public.portable_calendar_reschedules SET status='attention' WHERE status='submitting';

@@ -1,0 +1,2 @@
+ALTER TABLE "portable_team_availability" ADD COLUMN "time_off" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_team_availability" ADD CONSTRAINT "portable_team_time_off_limit" CHECK (jsonb_typeof("portable_team_availability"."time_off")='array' AND jsonb_array_length("portable_team_availability"."time_off")<=24);

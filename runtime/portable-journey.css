@@ -1,0 +1,48 @@
+.portable-contacts > .harbor-attribution { margin:1rem; padding:clamp(1rem,2.4vw,2.5rem); background:#fff; border:1px solid #dce5e4; border-radius:1rem; color:#203b40; }
+.harbor-attribution .journey-header h1 { margin:0 0 .7rem; }
+.harbor-attribution .journey-tabs { display:flex; gap:1rem; border-bottom:1px solid #dce5e4; margin-bottom:1.4rem; }
+.harbor-attribution .journey-tabs a { text-decoration:none; padding:.5rem .2rem; }
+.harbor-attribution .journey-tabs [aria-current] { border-bottom:3px solid #167980; font-weight:700; }
+.harbor-attribution .journey-report-tools,.harbor-attribution .journey-actions,.harbor-attribution .journey-conversions li { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
+.harbor-attribution .journey-report-tools,.harbor-attribution .journey-conversions li { justify-content:space-between; }
+.harbor-attribution .journey-report-tools { color:#4a6669; }
+.harbor-attribution .journey-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin:1rem 0; }
+.harbor-attribution .journey-metrics div { background:#f0f6f4; border-radius:.65rem; padding:1rem 1.2rem; }
+.harbor-attribution .journey-metrics dt { font-size:.85rem; color:#496465; }
+.harbor-attribution .journey-metrics dd { margin:.35rem 0 0; font-size:1.9rem; font-weight:650; }
+.harbor-attribution .journey-card { min-width:0; border:1px solid #dce5e4; border-radius:.7rem; padding:1.1rem 1.2rem; margin:0 0 1rem; }
+.harbor-attribution h2 { margin:0 0 .75rem; font-size:1.22rem; }
+.harbor-attribution h3 { margin:1rem 0 .4rem; font-size:1rem; }
+.harbor-attribution p { max-width:76ch; color:#4b6365; margin:.6rem 0; }
+.harbor-attribution .journey-scroll { overflow-x:auto; }
+.harbor-attribution table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.harbor-attribution td,.harbor-attribution th { padding:.55rem .4rem; text-align:right; border-bottom:1px solid #e2e9e8; }
+.harbor-attribution th:first-child { text-align:left; overflow-wrap:anywhere; }
+.harbor-attribution .journey-conversions,.harbor-attribution .journey-path,.harbor-attribution .journey-site-list ul { padding:0; list-style:none; margin:0; }
+.harbor-attribution .journey-conversions li,.harbor-attribution .journey-path li { padding:.7rem 0; border-bottom:1px solid #e2e9e8; }
+.harbor-attribution .journey-conversions span,.harbor-attribution time,.harbor-attribution .journey-path span { display:block; font-size:.85rem; color:#52686a; }
+.harbor-attribution .journey-back { display:inline-flex; gap:.4rem; align-items:center; margin:0 0 1rem; }
+.harbor-attribution .journey-path { margin:0 0 1rem; }
+.harbor-attribution .journey-path li,.harbor-attribution .journey-install h2 { display:flex; gap:.5rem; align-items:baseline; overflow-wrap:anywhere; }
+.harbor-attribution .journey-settings { display:grid; grid-template-columns:minmax(13rem,1fr) minmax(0,3fr); gap:1.3rem; }
+.harbor-attribution .journey-site-list { min-width:0; }
+.harbor-attribution .journey-site-list ul { margin-bottom:.65rem; }
+.harbor-attribution .journey-site-list li button { width:100%; text-align:left; padding:.7rem; display:flex; align-items:center; gap:.4rem; border:1px solid transparent; }
+.harbor-attribution .journey-site-list li button[aria-current] { background:#eff6f4; border-color:#bdd7d1; }
+.harbor-attribution .journey-site-list small { display:block; color:#50676b; overflow-wrap:anywhere; }
+.harbor-attribution .journey-status { font-size:.74rem; margin-inline-start:auto; color:#626c6d; }
+.harbor-attribution .journey-status.enabled { color:#19664c; }
+.harbor-attribution .journey-site-detail { min-width:0; }
+.harbor-attribution fieldset { border:0; padding:0; margin:0; min-width:0; }
+.harbor-attribution .journey-card label { display:block; max-width:32rem; margin:.55rem 0; }
+.harbor-attribution input { box-sizing:border-box; width:100%; }
+.harbor-attribution .journey-actions { margin-top:1rem; }
+.harbor-attribution .journey-primary { background:#14676a; color:#fff; border-color:#14676a; }
+.harbor-attribution pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#f2f6f5; padding:.8rem; border-radius:.45rem; }
+.harbor-attribution summary { cursor:pointer; }
+@media(max-width:50rem) {
+  .portable-contacts > .harbor-attribution { margin:.5rem; }
+  .harbor-attribution .journey-settings { grid-template-columns:minmax(0,1fr); }
+  .harbor-attribution .journey-metrics { gap:.5rem; }
+  .harbor-attribution .journey-metrics div { padding:.75rem; }
+}

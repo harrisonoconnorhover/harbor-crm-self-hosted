@@ -1,5 +1,5 @@
 import {createHash,createHmac} from 'node:crypto';
-import {and,eq,gt,inArray,sql} from 'drizzle-orm';
+import {and,eq,gt,inArray,isNull,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {ApiError} from '../../lib/api-error';
 import type {OutlookItem,OutlookLookup,OutlookRecordResults} from '../../lib/outlook-records';
@@ -55,21 +55,26 @@ export async function finishOutlookLookup(db:PostgresJsDatabase,context:Context,
       .map(item=>({item,id:activityId(context.accountId,query.provider,item.id),selection:proof(context,contact,query,item)}))
       .sort((first,second)=>second.item.occurredAt-first.item.occurredAt||first.id.localeCompare(second.id));
     const ids=matches.map(match=>match.id);
-    const prior=new Map((ids.length?await tx.select({id:receipts.id,fingerprint:receipts.fingerprint}).from(receipts)
-      .where(and(eq(receipts.workspaceId,workspaceId),eq(receipts.namespace,'contact'),inArray(receipts.id,ids))):[]).map(row=>[row.id,row.fingerprint]));
+    const fingerprint='outlook:'+hash(context.accountId,query.provider,contact.id,contact.createdAt).toString('base64url');
+    const isMail=query.provider==='outlook-mail';
+    const prior=new Map((ids.length?await tx.select({id:receipts.id,fingerprint:receipts.fingerprint,receivedAt:receipts.outlookReceivedAt}).from(receipts)
+      .where(and(eq(receipts.workspaceId,workspaceId),eq(receipts.namespace,'contact'),inArray(receipts.id,ids))):[]).map(row=>[row.id,row]));
     if(!selection)return {items:matches.map(({item,id,selection})=>({selection,subject:item.subject,
-      occurredAt:item.occurredAt,excerpt:item.excerpt,logged:prior.has(id)})),limited:results.limited};
+      occurredAt:item.occurredAt,excerpt:item.excerpt,logged:prior.has(id),
+      canConfirmReply:isMail&&prior.get(id)?.receivedAt===null&&prior.get(id)?.fingerprint===fingerprint})),limited:results.limited};
     const match=matches.find(item=>item.selection===selection);
     if(!match)throw changed();
-    const fingerprint='outlook:'+hash(context.accountId,query.provider,contact.id,contact.createdAt).toString('base64url');
+    const reply=isMail?{outlookContactId:contact.id,outlookMailbox:context.email,outlookReceivedAt:match.item.occurredAt}:undefined;
     if(prior.has(match.id)){
-      if(prior.get(match.id)!==fingerprint)throw new ApiError(409,'This Outlook item has already been recorded. Check the timeline.');
+      if(prior.get(match.id)?.fingerprint!==fingerprint)throw new ApiError(409,'This Outlook item has already been recorded. Check the timeline.');
+      // A fresh provider selection can also identify a receipt created before reply tracking.
+      if(reply)await tx.update(receipts).set(reply).where(and(eq(receipts.workspaceId,workspaceId),
+        eq(receipts.namespace,'contact'),eq(receipts.id,match.id),isNull(receipts.outlookReceivedAt)));
       return {logged:true,alreadyLogged:true};
     }
-    const isMail=query.provider==='outlook-mail';
     await tx.insert(activities).values({workspaceId,id:match.id,contactId:contact.id,actorId:context.userId,kind:isMail?'Email':'Meeting',
       occurredAt:match.item.occurredAt,recordedAt:now,summary:(isMail?'Received in Outlook: ':'Attended meeting in Outlook: ')+match.item.subject});
-    await tx.insert(receipts).values({workspaceId,namespace:'contact',id:match.id,fingerprint});
+    await tx.insert(receipts).values({workspaceId,namespace:'contact',id:match.id,fingerprint,...reply});
     return {logged:true,alreadyLogged:false};
   });
 }

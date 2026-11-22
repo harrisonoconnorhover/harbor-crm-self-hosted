@@ -1,5 +1,7 @@
+import {effectiveMemberToolPolicy} from '../lib/portable-tool-permissions';
 import {z} from 'zod';
 import {contactFile,fileVersionKey,listContactFiles,listContactFileVersions,publishVersion,registerVersion} from '../db/postgres/contact-file-store';
+import {recordContactFileDownload} from '../db/postgres/record-access-store';
 import {visibleContactScope} from '../db/postgres/contact-store';
 import {sharedWorkspaceGrant} from '../db/postgres/workspace-viewer-store';
 import {sharedRecordWriteScope} from '../lib/portable-workspace-access';
@@ -37,8 +39,10 @@ async function route(request:Request){
         const parsed=sharedRecordWriteScope.safeParse({workspaceId,grantId});
         if(!parsed.success)return accessChanged();
         shared=parsed.data;
-        const grant=await sharedWorkspaceGrant(db,user.userId,shared.workspaceId);
+        const grant=await sharedWorkspaceGrant(db,user.userId,shared.workspaceId,true);
         if(!grant?.contactFiles||grant.role!=='editor'||grant.id!==shared.grantId)return accessChanged();
+        const policy=effectiveMemberToolPolicy(grant,'files');
+        if(expectedVersion?policy.edit==='none':!policy.create)return accessChanged();
       }
       const contact=await visibleContactScope(db,user.userId,recordId,workspaceId,'contactFiles');
       if(!contact)return failure('Contact not found.',404);
@@ -69,14 +73,22 @@ async function route(request:Request){
       if(!scope)return failure('Contact not found.',404);
       const version=await contactFile(db,scope,input.data.fileId,input.data.versionId);
       if(!version)return failure('File not found.',404);
-      try{
-        const bytes=await readPrivateObject(fileVersionKey(version),version);
-        if(!await visibleContactScope(db,user.userId,scope.contactId,input.data.workspaceId,'contactFiles')){
-          return failure('Contact not found.',404);
-        }
-        return new Response(bytes,{headers:{...headers,'content-type':'application/octet-stream',
-          'content-disposition':attachmentDisposition(version.name),'content-length':String(bytes.length),'x-content-type-options':'nosniff'}});
-      }catch{return failure('File contents could not be verified.',502);}
+      let bytes;
+      try{bytes=await readPrivateObject(fileVersionKey(version),version);}
+      catch{return failure('File contents could not be verified.',502);}
+      const response=new Response(request.method==='HEAD'?null:bytes,{headers:{...headers,'content-type':'application/octet-stream',
+        'content-disposition':attachmentDisposition(version.name),'content-length':String(bytes.length),'x-content-type-options':'nosniff'}});
+      // Access or file placement can change during the object-store read. Check both
+      // against one database snapshot before recording or releasing the verified version.
+      const allowed=await db.transaction(async tx=>{
+        const current=await visibleContactScope(tx,user.userId,scope.contactId,input.data.workspaceId,'contactFiles');
+        if(!current||current.workspaceId!==scope.workspaceId)return false;
+        const pinned=await contactFile(tx,current,version.fileId,version.versionId);
+        if(!pinned?.revision)return false;
+        if(request.method==='GET')await recordContactFileDownload(tx,user,{...current,fileId:pinned.fileId,versionId:pinned.versionId,revision:pinned.revision});
+        return true;
+      },{isolationLevel:'repeatable read',accessMode:request.method==='HEAD'?'read only':'read write'});
+      return allowed?response:failure('Contact or file not found.',404);
     }
     if(params.has('versionsFor')){
       const input=history.safeParse(values);
@@ -104,4 +116,4 @@ async function route(request:Request){
   }
 }
 
-export {route as GET,route as POST};
+export {route as GET,route as HEAD,route as POST};

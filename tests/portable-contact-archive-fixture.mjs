@@ -12,7 +12,28 @@ const receipt=async response=>{
   return (await response.json()).receipt;
 };
 
-export async function verifyPortableContactArchive({request,origin,headers,other,sql}){
+async function cancelBlockingNoteInBrowser(origin,headers,contact,job){
+  const {chromium}=await import(process.env.HARBOR_TEST_PLAYWRIGHT??'playwright');
+  const browser=await chromium.launch({executablePath:process.env.HARBOR_TEST_CHROME});
+  try{
+    const page=await browser.newPage();
+    const [name,value]=headers.cookie.split('=');
+    await page.context().addCookies([{name,value,url:origin}]);
+    await page.goto(origin+'/?contact='+contact.id);
+    await page.getByRole('button',{name:'Archive contact',exact:true}).click();
+    await page.getByRole('button',{name:'Confirm archive'}).click();
+    await page.getByRole('link',{name:'Review blocking job'}).click();
+    await page.getByRole('heading',{name:'Job details',exact:true}).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get('jobId'),job.id);
+    page.once('dialog',dialog=>dialog.accept());
+    await page.getByRole('button',{name:'Cancel Note'}).click();
+    await page.getByText('Cancellation saved.',{exact:true}).waitFor();
+    await page.getByRole('link',{name:contact.data.name,exact:true}).first().click();
+    assert.equal(new URL(page.url()).searchParams.get('contact'),contact.id);
+  }finally{await browser.close();}
+}
+
+export async function verifyPortableContactArchive({request,origin,headers,other,sql,browser=false}){
   const reset=()=>sql`DELETE FROM portable_request_budgets WHERE scope IN ('api_read','api_write') AND subject IN
     (SELECT id FROM login_identities WHERE email IN ('owner@example.test','other@example.test'))`;
   await reset();
@@ -43,8 +64,11 @@ export async function verifyPortableContactArchive({request,origin,headers,other
   assert.equal((await send(jobPath,job)).status,202);
   const pending=await send(archivePath,archive);
   assert.equal(pending.status,409);
-  assert.match((await pending.json()).error,/Resolve pending jobs/);
-  assert.equal((await send(jobPath,{action:'cancelNote',id:job.id})).status,200);
+  const conflict=await pending.json();
+  assert.match(conflict.error,/Resolve pending jobs/);
+  assert.equal(conflict.blockingJobId,job.id);
+  if(browser)await cancelBlockingNoteInBrowser(origin,headers,original,job);
+  else assert.equal((await send(jobPath,{action:'cancelNote',id:job.id})).status,200);
 
   await sql`ALTER TABLE portable_contact_archive_receipts ADD CONSTRAINT fixture_archive_receipt_fail CHECK (request_id<>'00000000-0000-4000-8000-000000000099'::uuid)`;
   try{
@@ -91,6 +115,57 @@ export async function verifyPortableContactArchive({request,origin,headers,other
   }
   await reset();
   return {archive:recoverable,receipt:beforeRecovery,candidate};
+}
+
+export async function verifyArchiveListHistory({request,origin,headers,other,sql}){
+  const write=async(path,body)=>{
+    const response=await post(request,path,origin,headers,body);
+    assert.ok(response.ok,await response.clone().text());
+    return response.json();
+  };
+  const team=await write('/api/workspaces',{action:'grant',email:'other@example.test'});
+  const memberId=team=>team.viewers.find(member=>member.email==='other@example.test').id;
+  let grantId=memberId(await write('/api/workspaces',{action:'role',id:memberId(team),role:'editor'}));
+  async function permissions(scope){
+    grantId=memberId(await write('/api/workspaces',{action:'record_scope',id:grantId,viewScope:scope,editScope:scope}));
+    return '&'+new URLSearchParams({workspaceId:team.owned,grantId});
+  }
+  const shared=await permissions('all');
+  const count=async()=>(await sql`SELECT count(*)::int AS n FROM portable_record_access_events`)[0].n;
+  for(const kind of ['contacts','companies','deals','tasks','leads','tickets']){
+    const data={name:'Fictional archived '+kind};
+    const saved=await write(kind==='leads'||kind==='tickets'?'/api/'+kind:crm,{action:'save',...(kind==='leads'||kind==='tickets'?{}:{kind}),data});
+    const record=kind==='leads'?await (await request('/api/leads?id='+saved.id,{headers})).json():saved.record;
+    assert.ok(record?.id&&record.revision,kind+' must have a saved revision');
+    await write(archivePath,{kind,...change(record,'archive')});
+    const path=archivePath+'?kind='+kind;
+    const before=await count();
+    let lastOwnerRecord;
+    for(const [identity,scope,email] of [[headers,'','owner@example.test'],[other,shared,'other@example.test']]){
+      const response=await request(path+scope,{headers:identity});
+      assert.equal(response.status,200,await response.clone().text());
+      const ids=(await response.json()).records.map(item=>item.id);
+      assert.ok(ids.includes(record.id),kind);
+      if(!scope)lastOwnerRecord=ids.at(-1);
+      const [event]=await sql`SELECT record_ids FROM portable_record_access_events WHERE workspace_id=${team.owned}
+        AND kind=${kind} AND actor_email=${email} AND action='list' AND ${record.id}::uuid=ANY(record_ids)
+        ORDER BY occurred_at DESC LIMIT 1`;
+      assert.deepEqual(event?.record_ids,ids);
+    }
+    assert.equal((await request(path+shared,{method:'HEAD',headers:other})).status,200);
+    const empty=await request(path+'&after='+lastOwnerRecord,{headers});
+    assert.equal(empty.status,200);
+    assert.deepEqual((await empty.json()).records,[]);
+    assert.equal(await count(),before+2,'Only populated record pages should add receipts.');
+  }
+  const owned=await permissions('owned');
+  const before=await count();
+  const restricted=await request(archivePath+'?kind=contacts'+owned,{headers:other});
+  assert.equal(restricted.status,200);
+  assert.deepEqual((await restricted.json()).records,[]);
+  await write('/api/workspaces',{action:'revoke',id:grantId});
+  assert.equal((await request(archivePath+'?kind=contacts'+owned,{headers:other})).status,403);
+  assert.equal(await count(),before);
 }
 
 export async function verifyRestoredPortableContactArchive({restored,origin,owner,other,source,sourceOwner,fixture}){

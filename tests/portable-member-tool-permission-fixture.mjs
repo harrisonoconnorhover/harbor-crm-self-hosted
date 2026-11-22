@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict';
+
+// Start with unrestricted editors and existing assigned CRM records from the team rehearsal.
+export async function verifyMemberToolPermissions({read,get,post,change,headers,other,scope,rep,peer,all,one,check,drill,contactReport,file,make,repId,reset}){
+  await reset();
+  const member=(directory,email)=>directory.viewers.find(row=>row.email===email);
+  const set=(ids,policy)=>({action:'tool_permissions',ids,tool:'contacts',policy});
+  const denied={view:'none',edit:'none',create:false,delete:false};
+  const owned={view:'owned',edit:'none',create:true,delete:false};
+  const write=(grant,body)=>post('/api/crm?'+scope+'&grantId='+grant,other,{kind:'contacts',action:'save',...body});
+  const aux=async(tool,policy)=>{rep=member(await change({action:'tool_permissions',ids:[rep.id],tool,policy}),rep.email);};
+  await aux('files',denied);
+  assert.equal((await get(file+'&'+scope)).status,404);
+  assert.equal((await get('/?view=files&'+scope)).status,404);
+  await aux('files',{view:'all',create:false,edit:'all',delete:false});
+  assert.equal((await get(file+'&'+scope)).status,200);
+  const upload=extra=>post(file+'&'+scope+'&grantId='+rep.id+'&versionId='+crypto.randomUUID()+extra,other,{});
+  assert.equal((await upload('')).status,403);
+  await aux('files',{view:'all',create:true,edit:'none',delete:false});
+  assert.equal((await upload('&expectedVersion='+crypto.randomUUID())).status,403);
+  const row=await make('contacts','Recycle permission rehearsal',repId);
+  const bin=()=>'/api/recycle-bin?'+scope+'&grantId='+rep.id;
+  const archive=(action,revision)=>post(bin(),other,{action,kind:'contacts',id:row.id,expectedRevision:revision,requestId:crypto.randomUUID()});
+  await aux('recycle-bin',denied);
+  const receipt=(await read(archive('archive',row.revision))).receipt;
+  assert.equal((await get(bin()+'&kind=contacts')).status,403);
+  await aux('recycle-bin',{view:'all',create:false,edit:'none',delete:false});
+  assert.equal((await get(bin()+'&kind=contacts')).status,200);
+  assert.equal((await archive('restore',receipt.revision)).status,403);
+  await aux('recycle-bin',{view:'all',create:false,edit:'all',delete:false});
+  await read(archive('restore',receipt.revision));
+  await reset();
+  const before=rep.id;
+  const failed=await post('/api/workspaces',other,set([rep.id],denied));
+  assert.ok([403,404,409].includes(failed.status));
+  assert.equal((await post('/api/workspaces',headers,set([rep.id,crypto.randomUUID()],denied))).status,409);
+  const updated=await change(set([rep.id,peer.id],denied));
+  rep=member(updated,rep.email);peer=member(updated,peer.email);
+  assert.notEqual(rep.id,before);
+  assert.deepEqual(rep.toolPolicies.contacts,denied);
+  assert.deepEqual(peer.toolPolicies.contacts,denied);
+  const mine=all.contacts.mine;
+  assert.equal((await get(one('contacts',mine.id))).status,404);
+  assert.equal((await get(file+'&'+scope)).status,404);
+  assert.deepEqual(await read(check('contacts',mine.id,undefined,rep.id)),{canView:false,canEdit:false});
+  assert.deepEqual((await read(get('/api/crm?kind=contacts&'+scope))).records,[]);
+  assert.deepEqual((await read(post('/api/crm/search?'+scope,other,{kind:'contacts',query:'Scope'}))).results,[]);
+  const report=await get(drill+contactReport.id);
+  if(report.ok)assert.deepEqual((await report.json()).records,[]);
+  else assert.equal(report.status,404);
+  const unrelated=await read(get(one('deals',all.deals.mine.id)));
+  assert.equal(unrelated.primaryContactId,null);
+  assert.equal((await write(rep.id,{data:{name:'Denied test contact'}})).status,403);
+  rep=member(await change(set([rep.id],owned)),rep.email);
+  assert.equal((await write(before,{data:{name:'Outdated grant'}})).status,403);
+  const created=(await read(write(rep.id,{data:{name:'Member permission test contact'}}),201)).record;
+  assert.equal((await get(one('contacts',created.id))).status,200);
+  assert.equal((await get(one('contacts',all.contacts.hidden.id))).status,404);
+  const edit=await write(rep.id,{id:created.id,expectedRevision:created.revision,data:{name:'Blocked edit'}});
+  assert.ok([403,404].includes(edit.status));
+  const deniedArchive=await post('/api/recycle-bin?'+scope+'&grantId='+rep.id,other,{kind:'contacts',action:'archive',id:created.id,
+    expectedRevision:created.revision,requestId:crypto.randomUUID()});
+  assert.equal(deniedArchive.status,403);
+  const teamRead={view:'team',edit:'owned',create:false,delete:false};
+  rep=member(await change(set([rep.id],teamRead)),rep.email);
+  assert.equal((await get(one('contacts',all.contacts.theirs.id))).status,200);
+  assert.equal((await get(one('contacts',all.contacts.hidden.id))).status,404);
+  assert.equal((await write(rep.id,{data:{name:'No new contacts'}})).status,403);
+  const edited=(await read(write(rep.id,{id:created.id,expectedRevision:created.revision,data:{name:'Permitted contact edit'}}))).record;
+  assert.equal((await post('/api/recycle-bin?'+scope+'&grantId='+rep.id,other,{kind:'contacts',action:'archive',id:edited.id,
+    expectedRevision:edited.revision,requestId:crypto.randomUUID()})).status,403);
+  rep=member(await change({action:'role',id:rep.id,role:'viewer'}),rep.email);
+  assert.equal((await write(rep.id,{id:edited.id,expectedRevision:edited.revision,data:{name:'Viewer edit'}})).status,403);
+  return {rep,peer};
+}

@@ -1,3 +1,5 @@
+import {recordUpdatedKey} from './record-updated-key';
+import {recordSearchIndex} from './search-index';
 import {isNull,sql,type SQLWrapper} from 'drizzle-orm';
 import {boolean,check,doublePrecision,foreignKey,index,integer,jsonb,pgTable,pgView,primaryKey,text,timestamp,unique,uuid} from 'drizzle-orm/pg-core';
 import type {PortableTaskFields} from '../../lib/portable-tasks';
@@ -43,6 +45,9 @@ export const portableTasks=pgTable('portable_tasks',{
   createdAt:timestamp('created_at',{withTimezone:true,mode:'string'}).notNull(),
   updatedAt:timestamp('updated_at',{withTimezone:true,mode:'string'}).notNull(),
 },table=>[
+  index('portable_tasks_archived_time_page').on(table.workspaceId,recordUpdatedKey(table.archivedAt),table.id).where(sql`${table.archivedAt} IS NOT NULL`),
+  index('portable_tasks_recent_page').on(table.workspaceId,recordUpdatedKey(table.updatedAt),table.id).where(sql`${table.archivedAt} IS NULL`),
+  recordSearchIndex('portable_tasks_search_values',table.data,table.archivedAt),
   primaryKey({columns:[table.workspaceId,table.id]}),
   foreignKey({name:'portable_task_contact_fk',columns:[table.workspaceId,table.contactId],foreignColumns:[contacts.workspaceId,contacts.id]}),
   foreignKey({name:'portable_task_company_fk',columns:[table.workspaceId,table.companyId],foreignColumns:[companies.workspaceId,companies.id]}),
@@ -67,6 +72,7 @@ export const portableTasks=pgTable('portable_tasks',{
     .where(pendingTaskRepeat(table.data,table.completedAt,table.archivedAt)),
 ]);
 
+export const taskOwnership={workspaceId:portableTasks.workspaceId,assigneeId:portableTasks.assigneeId};
 export const activeTask=isNull(portableTasks.archivedAt);
 
 type TaskSnapshotSource=Pick<typeof portableTasks.$inferSelect,
@@ -77,6 +83,7 @@ export const portableTaskSnapshot=({data,assigneeId,assigneeLabel,contactId,comp
 });
 
 export const taskEventContact=(data:SQLWrapper)=>sql<string>`${data}->>'contactId'`;
+export const taskEventDeal=(data:SQLWrapper)=>sql<string>`${data}->>'dealId'`;
 export const taskCompletedTransition=(data:SQLWrapper,previous:SQLWrapper)=>sql`
   ${data}->'fields'->>'status' = 'Completed' AND
   ${previous}->'fields'->>'status' IS DISTINCT FROM 'Completed'`;
@@ -92,6 +99,8 @@ export const portableTaskEvents=pgTable('portable_task_events',{
 },table=>[
   primaryKey({columns:[table.workspaceId,table.taskId,table.revision]}),
   foreignKey({name:'portable_task_event_task_fk',columns:[table.workspaceId,table.taskId],foreignColumns:[portableTasks.workspaceId,portableTasks.id]}),
+  index('portable_task_completion_deal').on(table.workspaceId,sql`(${taskEventDeal(table.data)})`,table.occurredAt,table.taskId,table.revision)
+    .where(taskCompletedTransition(table.data,table.previous)),
   index('portable_task_completion_contact').on(table.workspaceId,sql`(${taskEventContact(table.data)})`,table.occurredAt,table.taskId,table.revision)
     .where(taskCompletedTransition(table.data,table.previous)),
 ]);

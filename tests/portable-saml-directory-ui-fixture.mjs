@@ -1,0 +1,94 @@
+import assert from 'node:assert/strict';
+
+export async function verifySamlDirectorySettings(origin,ownerCookie){
+  const {chromium}=await import(process.env.HARBOR_TEST_PLAYWRIGHT??'playwright');
+  const browser=await chromium.launch({executablePath:process.env.HARBOR_TEST_CHROME});
+  try{
+    const context=await browser.newContext();
+    const [name,value]=ownerCookie.split('=');
+    await context.addCookies([{name,value,url:origin}]);
+    const page=await context.newPage();
+    await page.goto(origin+'/?view=api-access');
+    await page.getByLabel('Token name').fill('Fictional HR sync');
+    await page.getByLabel('Token purpose').selectOption({label:'Manage company SSO employees'});
+    await page.getByRole('button',{name:'Create directory token'}).click();
+    const secret=await page.getByRole('region',{name:'New token'}).getByRole('textbox').inputValue();
+    const headers={authorization:'Bearer '+secret};
+    const resources=origin+'/scim/v2/ResourceTypes';
+    const before=await context.request.get(resources,{headers});
+    assert.equal(before.status(),200);
+    assert.deepEqual((await before.json()).Resources.map(item=>item.name),['User','Group']);
+    const employee='former@fictional-directory.example';
+    const created=await context.request.post(origin+'/scim/v2/Users',{headers:{...headers,'content-type':'application/scim+json'},
+      data:{schemas:['urn:ietf:params:scim:schemas:core:2.0:User'],userName:employee,externalId:'Fictional-Former',displayName:'Rowan Trial',active:true}});
+    assert.equal(created.status(),201);
+    const userId=(await created.json()).id;
+    await page.getByRole('button',{name:'Hide token'}).click();
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(origin+'/?view=settings');
+    await page.getByRole('link',{name:/Team directory/}).click();
+    await page.waitForFunction(()=>document.activeElement?.id==='team-directory');
+    await page.getByText('Check company directory access',{exact:true}).click();
+    await page.getByLabel('Employee email').fill(employee);
+    await page.getByRole('button',{name:'Check access'}).click();
+    const review=page.getByRole('link',{name:'Review record and field access'});
+    await page.getByText(/Rowan Trial · Company SSO · Active/).waitFor();
+    const auditUrl=await page.getByRole('listitem').filter({hasText:'Rowan Trial · Company SSO · Active'}).getByRole('link',{name:'View record access history',exact:true}).getAttribute('href');
+    const actor=new URL(auditUrl,origin).searchParams.get('actor');
+    assert.ok(actor&&actor!==userId,'History identifies the Harbor account independently of the directory resource');
+    const previewUrl=await review.getAttribute('href');
+    await review.click();
+    const access=page.getByRole('region',{name:'Record access',exact:true});
+    await access.getByText('Their own records',{exact:true}).waitFor();
+    await access.getByText('View only',{exact:true}).waitFor();
+    await page.getByRole('heading',{name:'Record and field access for '+employee}).waitFor();
+    await page.getByRole('link',{name:'Back to team directory'}).click();
+    await page.waitForFunction(()=>document.activeElement?.id==='team-directory');
+    const retired=await context.request.patch(origin+'/scim/v2/Users/'+userId,{headers:{...headers,'content-type':'application/scim+json'},
+      data:{schemas:['urn:ietf:params:scim:api:messages:2.0:PatchOp'],Operations:[{op:'replace',value:{active:false,displayName:'Rowan West'}}]}});
+    assert.equal(retired.status(),200);
+    assert.equal((await context.request.get(origin+previewUrl)).status(),404);
+    await page.goto(origin+'/?view=api-access');
+    const revoke=page.getByRole('button',{name:'Revoke Fictional HR sync'});
+    await revoke.click();
+    await page.getByText('Token revoked.',{exact:true}).waitFor();
+    assert.equal((await context.request.get(resources,{headers})).status(),401);
+    await page.goto(origin+'/?view=workspaces#team-directory');
+    await page.getByText('Check company directory access',{exact:true}).click();
+    await page.getByLabel('Employee email').fill(employee);
+    await page.getByRole('button',{name:'Check access'}).click();
+    const former=page.getByRole('listitem').filter({hasText:'Rowan West · Company SSO · Inactive · No workspace access'});
+    await former.getByRole('link',{name:'View record access history'}).waitFor();
+    assert.equal(await review.count(),0);
+    await page.getByLabel('Find employees by').selectOption({label:'Inactive employees'});
+    await page.getByRole('button',{name:'Check access'}).click();
+    const listed=page.getByRole('listitem').filter({has:page.getByText(employee,{exact:true})});
+    await listed.getByText(employee,{exact:true}).waitFor();
+    assert.match(await listed.innerText(),/Rowan West · Company SSO · Inactive · No workspace access/);
+    assert.equal(await listed.getByRole('link',{name:'Review record and field access'}).count(),0);
+    await listed.getByRole('link',{name:'View record access history'}).click();
+    await page.getByRole('heading',{name:'Record access history'}).waitFor();
+    assert.equal(new URL(page.url()).searchParams.get('actor'),actor);
+    assert.equal(await page.getByLabel('Actor email').inputValue(),'');
+    await page.getByRole('link',{name:'Team directory',exact:true}).click();
+    await page.waitForFunction(()=>document.activeElement?.id==='team-directory');
+    const selectSales=async()=>{
+      await page.locator('summary').filter({hasText:/^Teams and pods/}).click();
+      await page.getByRole('combobox',{name:/^Manage team/}).selectOption({label:'Harbor Sales'});
+    };
+    await selectSales();
+    const group=page.getByRole('region',{name:'Company SSO group'});
+    await group.getByLabel('Directory group name').fill('Pilot group');
+    await group.getByLabel('Directory group ID (recommended)').fill('Pilot/Team-1');
+    await group.getByRole('button',{name:'Link directory group'}).click();
+    await group.getByText('Pilot group',{exact:true}).waitFor();
+    await page.reload();
+    await selectSales();
+    await group.getByText('Pilot group',{exact:true}).waitFor();
+    await group.getByText('Pilot/Team-1',{exact:true}).waitFor();
+    await group.getByText('Unlink directory group…').click();
+    await group.getByRole('button',{name:'Unlink directory group'}).click();
+    await group.getByLabel('Directory group name').waitFor();
+    return employee;
+  }finally{await browser.close();}
+}

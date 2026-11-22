@@ -1,0 +1,5 @@
+CREATE INDEX "contacts_recent_page" ON "contacts" USING btree ("workspace_id",date_trunc('milliseconds',"updated_at" AT TIME ZONE 'UTC'),"id") WHERE "contacts"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "companies_recent_page" ON "companies" USING btree ("workspace_id",date_trunc('milliseconds',"updated_at" AT TIME ZONE 'UTC'),"id") WHERE "companies"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "deals_recent_page" ON "deals" USING btree ("workspace_id",date_trunc('milliseconds',"updated_at" AT TIME ZONE 'UTC'),"id") WHERE "deals"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "portable_tasks_recent_page" ON "portable_tasks" USING btree ("workspace_id",date_trunc('milliseconds',"updated_at" AT TIME ZONE 'UTC'),"id") WHERE "portable_tasks"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "portable_leads_recent_page" ON "portable_leads" USING btree ("workspace_id",date_trunc('milliseconds',"updated_at" AT TIME ZONE 'UTC'),"id") WHERE "portable_leads"."archived_at" IS NULL;

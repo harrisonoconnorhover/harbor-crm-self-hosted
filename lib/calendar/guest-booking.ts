@@ -31,7 +31,7 @@ export type GuestBookingPage={
 };
 
 type Operations={
-  load:()=>Promise<GuestBookingPage|null>;
+  load:(start:string)=>Promise<GuestBookingPage|null>;
   claim:(claim:GuestBookingClaim)=>Promise<boolean>;
   verify:(requestId:string,codeHash:string,now:number)=>Promise<string|null>;
   send:(claim:GuestBookingClaim,code:string)=>Promise<void>;
@@ -43,7 +43,7 @@ export async function processGuestBooking(input:GuestBookingInput,operations:Ope
     if(!receipt)throw new ApiError(400,'The verification code is incorrect or expired.');
     return {verified:true as const,receipt};
   }
-  const page=await operations.load();
+  const page=await operations.load(input.start);
   if(!page)throw guestPageUnavailable();
   const slot=page.slots.find(value=>value.start===input.start&&Date.parse(value.start)>now);
   if(!slot)throw new ApiError(409,'This time is no longer offered. Reload the availability page.');

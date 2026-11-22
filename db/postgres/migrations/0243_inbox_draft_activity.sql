@@ -1,0 +1,2 @@
+ALTER TABLE "portable_inbox_conversations" ADD COLUMN "draft_activity_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "portable_inbox_conversations" ADD COLUMN "draft_activity_revision" integer;

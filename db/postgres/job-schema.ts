@@ -20,6 +20,7 @@ export const portableJobs=pgTable('portable_jobs',{
   authorizedOwnerId:text('authorized_owner_id').references(()=>loginIdentities.id),
   kind:text('kind').$type<JobKind>().notNull(),
   body:text('body').notNull(),
+  waitForLifecycle:text('wait_for_lifecycle'),
   scheduledFor:ms('scheduled_for').notNull(),
   availableAt:ms('available_at').notNull(),
   createdAt:ms('created_at').notNull(),
@@ -37,6 +38,11 @@ export const portableJobs=pgTable('portable_jobs',{
   primaryKey({columns:[t.workspaceId,t.id]}),
   foreignKey({columns:[t.workspaceId,t.contactId],foreignColumns:[contacts.workspaceId,contacts.id]}),
   foreignKey({columns:[t.workspaceId,t.contactId,t.segmentEntryRevision],foreignColumns:[contactEvents.workspaceId,contactEvents.contactId,contactEvents.revision]}),
+  index('portable_jobs_wait_for_contact').on(t.workspaceId,t.contactId,t.waitForLifecycle).where(sql`${t.status}='queued' AND ${t.waitForLifecycle} IS NOT NULL`),
+  check('portable_job_event_wait',sql`${t.waitForLifecycle} IS NULL OR (
+    (${t.status} IN ('queued','skipped') AND ${t.kind} IN ('note','task','external') OR
+     ${t.kind}='external' AND ${t.status}='attention' AND ${t.issue} IS NOT DISTINCT FROM 'restore_requires_reconciliation') AND ${t.attempts}=0
+    AND ${t.waitForLifecycle} IN ('Subscriber','Lead','Marketing qualified lead','Sales qualified lead','Opportunity','Customer','Evangelist','Other'))`),
   index('portable_jobs_ready').on(t.workspaceId,t.availableAt,t.id).where(sql`${t.status}='queued'`),
   index('portable_jobs_due_status').on(t.availableAt).where(sql`${t.status}='queued'`),
   index('portable_jobs_attention_status').on(t.status,t.finishedAt).where(sql`${t.status} IN ('attention','failed')`),

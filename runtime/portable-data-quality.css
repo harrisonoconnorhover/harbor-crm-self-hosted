@@ -1,0 +1,12 @@
+.portable-data-quality { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,21rem),1fr)); gap:1rem; align-items:start; }
+.portable-data-quality > section { padding:1rem; border:1px solid #d9e2e1; border-radius:8px; min-width:0; }
+.portable-data-quality h2 { margin:0 0 .5rem; font-size:1.1rem; }
+.portable-data-quality p,.portable-data-quality small { color:#486163; }
+.portable-data-quality p { margin:0 0 .75rem; }
+.portable-data-quality dl { margin:.65rem 0; }
+.portable-data-quality dl div { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; padding:.35rem 0; border-bottom:1px solid #e7edec; }
+.portable-data-quality dd { margin:0; font-weight:650; text-align:right; }
+.portable-data-quality .quality-links { display:flex; flex-wrap:wrap; gap:.5rem 1rem; }
+.portable-data-quality details,.portable-data-quality button { margin:.5rem 0; }
+.portable-data-quality small { display:block; }
+.portable-data-quality ul { padding-left:1.2rem; }

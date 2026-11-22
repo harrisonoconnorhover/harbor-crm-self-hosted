@@ -30,7 +30,11 @@
 .portable-access-controls .portable-access-direct form { padding: 0; background: transparent; border: 0; }
 .portable-access-controls .portable-access-search { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .portable-access-search label { min-inline-size: 0; flex: 1 1 12rem; max-inline-size: 23rem; margin: 0; }
-.portable-access-search input { inline-size: 100%; }
+.portable-access-search input[type=search],.portable-access-search select { inline-size: 100%; }
+.portable-access-controls :is(.portable-access-search,.portable-access-direct) .directory-child-teams { display:flex; align-items:center; gap:6px; flex:0 1 auto; }
+.portable-access-controls :is(.portable-access-search,.portable-access-direct) .directory-child-teams input { inline-size:auto; }
+.portable-directory-pages { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-block:8px; }
+.portable-member-team { display:block; font-weight:400; }
 .portable-access-tally, .portable-access-role { display: inline-block; border-radius: 1rem; padding: 2px 8px; font-size: .75rem; font-weight: 650; }
 .portable-access-tally, .portable-access-role { background: #eef3f2; color: #465e60; }
 .portable-access-role[data-role="editor"] { color: #235a51; background: #e2f2ec; }
@@ -88,3 +92,8 @@
   .portable-access-member > summary { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 3px 8px; }
   .portable-access-member .portable-access-count { grid-column: 2 / -1; }
 }
+
+.portable-joined-workspaces form { display:flex; flex-wrap:wrap; align-items:end; gap:.5rem; margin-block:1rem; }
+.portable-joined-workspaces label { display:grid; gap:.25rem; }
+.portable-joined-workspaces ul { list-style:none; padding:0; }
+.portable-joined-workspaces li { padding-block:.5rem; }

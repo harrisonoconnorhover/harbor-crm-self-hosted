@@ -12,10 +12,12 @@ import {activeDeal} from './deal-visibility';
 import {deals} from './deal-schema';
 import {visibleContactScope} from './contact-store';
 import {jobClock} from './job-store';
-import {portableContactActivities as activities} from './portable-contact-activity-schema';
+import type {AircallAsset} from '../../lib/aircall-activity';
+import {portableContactActivities as activities,reportedAircallAssets} from './portable-contact-activity-schema';
 import {portableRecordActivities as recordActivities} from './portable-record-activity-schema';
 import {privateWorkspaces} from './workspace-schema';
 import {recordWorkspaceScope} from './workspace-viewer-store';
+import {ownedRecordScope} from './record-ownership-scope';
 import {lockRecordWorkspace} from './private-workspace-store';
 import {outreachActivityTypes} from '../../lib/activity-date-policy';
 import {digest} from '../../lib/api-access';
@@ -41,12 +43,13 @@ function occurredWithin(column:AnyPgColumn,filters:PortableActivityFilters){
 async function readActivityPage(db:Db,table:typeof activities|typeof recordActivities,scope:SQL|undefined,
   {afterAt,afterId}:Pick<PortableOutreachQuery,'afterAt'|'afterId'>,filters:PortableActivityFilters={}){
   const fields={id:table.id,revision:table.revision,kind:table.kind,occurredAt:table.occurredAt,summary:table.summary,
+    media:table===activities?sql<AircallAsset[]|null>`CASE WHEN ${activities.kind}='Call' THEN ${reportedAircallAssets(activities.workspaceId,activities.id)} END`:sql<null>`NULL`,
     gmail:table===activities?gmailSource:sql<false>`false`};
   const rows=await db.select(fields).from(table).where(and(scope,
     filters.channel?eq(table.kind,filters.channel):undefined,occurredWithin(table.occurredAt,filters),
     afterAt===undefined?undefined:sql`(${table.occurredAt},${table.id}) < (${afterAt},${afterId}::uuid)`))
     .orderBy(desc(table.occurredAt),desc(table.id)).limit(pageSize+1);
-  const items=rows.slice(0,pageSize).map(({gmail,...row})=>({...row,...(gmail?{fromGmail:true as const}:{})})),last=items.at(-1);
+  const items=rows.slice(0,pageSize).map(({gmail,media,...row})=>({...row,...(media?{aircallAssets:media}:{}),...(gmail?{fromGmail:true as const}:{})})),last=items.at(-1);
   const latest=()=>db.select({occurredAt:table.occurredAt}).from(table);
   const lastActivity=afterAt===undefined&&!hasActivityFilters(filters)?items[0]:
     (await latest().where(scope).orderBy(desc(table.occurredAt)).limit(1))[0];
@@ -124,7 +127,7 @@ async function visibleRecordActivityScope(db:Db,actorId:string,query:PortableRec
   const home=homes[query.kind];
   const [record]=await db.select({workspaceId:home.workspaceId}).from(home)
     .innerJoin(privateWorkspaces,eq(privateWorkspaces.id,home.workspaceId))
-    .where(and(recordWorkspaceScope(db,actorId,query.workspaceId,'recordActivities'),eq(home.id,query.recordId),activeHome(query.kind))).limit(1);
+    .where(and(query.workspaceId?ownedRecordScope(db,actorId,query.workspaceId,home,'view','recordActivities'):recordWorkspaceScope(db,actorId),eq(home.id,query.recordId),activeHome(query.kind))).limit(1);
   return record;
 }
 
@@ -172,14 +175,13 @@ export function readPortableActivityHistory(db:Db,actorId:string,query:PortableA
   return db.transaction(async tx=>{
     const {home,table,homeId,historyId}=activitySource(query);
     const contact=home.kind==='contacts';
-    const workspace=recordWorkspaceScope(tx,actorId,query.workspaceId,contact?'contactOutreach':'recordActivities');
-    if(contact&&!await visibleContactScope(tx,actorId,home.recordId,query.workspaceId,'contactOutreach'))return null;
-    if(home.kind!=='contacts'&&!await visibleRecordActivityScope(tx,actorId,{...query,kind:home.kind,recordId:home.recordId}))return null;
+    const record=home.kind==='contacts'?await visibleContactScope(tx,actorId,home.recordId,query.workspaceId,'contactOutreach'):
+      await visibleRecordActivityScope(tx,actorId,{...query,kind:home.kind,recordId:home.recordId});
+    if(!record)return null;
     // Shared history covers manual logs. Previous Gmail excerpts stay with the owner.
     const manualOnly=query.workspaceId&&contact?manualContactActivity:undefined;
     const [activity]=await tx.select({workspaceId:table.workspaceId}).from(table)
-      .innerJoin(privateWorkspaces,eq(privateWorkspaces.id,table.workspaceId))
-      .where(and(workspace,eq(table.id,query.history),eq(homeId,home.recordId),manualOnly)).limit(1);
+      .where(and(eq(table.workspaceId,record.workspaceId),eq(table.id,query.history),eq(homeId,home.recordId),manualOnly)).limit(1);
     if(!activity)return null;
     const rows=await tx.select({revision:history.revision,editorName:history.editorName,editedAt:history.editedAt,
       previousAt:history.previousAt,previousSummary:history.previousSummary,occurredAt:history.occurredAt,summary:history.summary})
@@ -205,13 +207,14 @@ async function originalCreate(db:Db,workspaceId:string,actorId:string,home:Activ
 
 export function logPortableOutreach(db:Db,actorId:string,contactId:string,input:PortableOutreach,shared?:SharedRecordWriteScope){
   return db.transaction(async tx=>{
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,'contactOutreach',true);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,'contactOutreach',true,true);
     if(!workspaceId)return shared?'access':'missing';
     const [contact]=await tx.select({id:contacts.id,formNote:sql<boolean>`EXISTS (
       SELECT 1 FROM ${inquiries} WHERE ${inquiries.workspaceId}=${workspaceId}
       AND ${inquiries.contactId}=${contactId} AND ${inquiries.timelineNoteId}=${input.id}
     )`}).from(contacts)
-      .where(and(eq(contacts.workspaceId,workspaceId),eq(contacts.id,contactId),activeContact));
+      .where(and(eq(contacts.workspaceId,workspaceId),eq(contacts.id,contactId),activeContact,
+        shared?ownedRecordScope(tx,actorId,workspaceId,contacts,'edit'):undefined));
     if(!contact)return 'missing';
     if(contact.formNote)return 'conflict';
     const [existing]=await tx.select().from(activities)
@@ -230,10 +233,11 @@ export function logPortableOutreach(db:Db,actorId:string,contactId:string,input:
 
 export function logPortableRecordActivity(db:Db,actorId:string,{kind,recordId}:PortableRecordActivityQuery,input:PortableOutreach,shared?:SharedRecordWriteScope){
   return db.transaction(async tx=>{
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,'recordActivities',true);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,'recordActivities',true,true);
     if(!workspaceId)return shared?'access':'missing';
     const home=homes[kind];
-    const [record]=await tx.select({id:home.id}).from(home).where(and(eq(home.workspaceId,workspaceId),eq(home.id,recordId),activeHome(kind))).limit(1);
+    const [record]=await tx.select({id:home.id}).from(home).where(and(eq(home.workspaceId,workspaceId),eq(home.id,recordId),activeHome(kind),
+      shared?ownedRecordScope(tx,actorId,workspaceId,home,'edit'):undefined)).limit(1);
     if(!record)return 'missing';
     const [existing]=await tx.select().from(recordActivities)
       .where(and(eq(recordActivities.workspaceId,workspaceId),eq(recordActivities.id,input.id)));
@@ -255,18 +259,13 @@ export function mutatePortableActivity(db:Db,actor:{userId:string;displayName:st
   input:PortableActivityMutation,shared?:SharedRecordWriteScope){
   return db.transaction(async tx=>{
     const {home,table,homeId}=activitySource(query),contactActivity=home.kind==='contacts';
-    const workspaceId=await lockRecordWorkspace(tx,actor.userId,false,shared,contactActivity?'contactOutreach':'recordActivities',true);
+    const workspaceId=await lockRecordWorkspace(tx,actor.userId,false,shared,contactActivity?'contactOutreach':'recordActivities',true,true);
     if(!workspaceId)return shared?'access':'missing';
-    if(contactActivity){
-      const [contact]=await tx.select({id:contacts.id}).from(contacts)
-        .where(and(eq(contacts.workspaceId,workspaceId),eq(contacts.id,home.recordId),activeContact));
-      if(!contact)return 'missing';
-    }else{
-      const records=homes[home.kind];
-      const [record]=await tx.select({id:records.id}).from(records)
-        .where(and(eq(records.workspaceId,workspaceId),eq(records.id,home.recordId),activeHome(home.kind)));
-      if(!record)return 'missing';
-    }
+    const records=home.kind==='contacts'?contacts:homes[home.kind];
+    const [record]=await tx.select({id:records.id}).from(records)
+      .where(and(eq(records.workspaceId,workspaceId),eq(records.id,home.recordId),contactActivity?activeContact:activeHome(home.kind),
+        shared?ownedRecordScope(tx,actor.userId,workspaceId,records,'edit'):undefined));
+    if(!record)return 'missing';
     const scope=and(eq(table.workspaceId,workspaceId),eq(homeId,home.recordId),eq(table.id,input.id),
       shared&&contactActivity?manualContactActivity:undefined);
     const [existing]=await tx.select({id:table.id,revision:table.revision,actorId:table.actorId,

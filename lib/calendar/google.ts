@@ -83,3 +83,20 @@ export async function calendarBusyExcept(token:string,id:string,start:string,end
  }
  throw new CalendarError('unavailable','Availability exceeded the safe page limit. Narrow the time window or manage this meeting in Google Calendar.');
 }
+
+export async function sharedCalendarBusy(token:string,emails:string[],start:string,end:string,fetcher:typeof fetch){
+  const interval=z.object({start:offsetDateTime,end:offsetDateTime});
+  const calendar=z.object({busy:z.array(interval).max(1000),errors:z.array(z.unknown()).optional()});
+  const raw=await call('https://www.googleapis.com/calendar/v3/freeBusy',{method:'POST',
+    headers:{...auth(token),'content-type':'application/json'},
+    body:JSON.stringify({timeMin:start,timeMax:end,items:emails.map(id=>({id}))})},false,fetcher);
+  const result=z.object({timeMin:offsetDateTime,timeMax:offsetDateTime,calendars:z.record(z.string(),z.unknown())}).parse(raw);
+  const confirmed=new Map<string,{start:string;end:string}[]>();
+  if(Date.parse(result.timeMin)>Date.parse(start)||Date.parse(result.timeMax)<Date.parse(end))return confirmed;
+  for(const email of emails){
+    const entry=calendar.safeParse(result.calendars[email]);
+    if(entry.success&&!entry.data.errors?.length&&entry.data.busy.every(i=>Date.parse(i.start)<Date.parse(i.end)))
+      confirmed.set(email,entry.data.busy);
+  }
+  return confirmed;
+}

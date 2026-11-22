@@ -1,0 +1,1 @@
+CREATE INDEX "inbox_conversation_text_search" ON "portable_inbox_conversations" USING gin (((coalesce(lower("subject"),'') || chr(31) || coalesce(lower("sender"),'')) COLLATE "C") public.gin_trgm_ops);

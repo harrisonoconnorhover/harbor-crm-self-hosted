@@ -1,0 +1,3 @@
+ALTER TABLE "portable_webhook_deliveries" ADD COLUMN "confirmed_by" text;--> statement-breakpoint
+ALTER TABLE "portable_webhook_deliveries" ADD CONSTRAINT "portable_webhook_owner_confirmation" CHECK ("portable_webhook_deliveries"."confirmed_by" IS NULL OR
+    ("portable_webhook_deliveries"."status"='delivered' AND "portable_webhook_deliveries"."finished_at" IS NOT NULL AND "portable_webhook_deliveries"."attempts">0));

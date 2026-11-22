@@ -1,0 +1,1 @@
+ALTER TABLE "portable_leads" ADD COLUMN "routing_miss" jsonb;

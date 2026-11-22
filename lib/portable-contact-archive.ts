@@ -1,7 +1,7 @@
 import {z} from 'zod';
 
 const id=z.string().guid("Invalid uuid");
-export const portableArchiveKind=z.enum(['contacts','companies','deals','tasks']);
+export const portableArchiveKind=z.enum(['contacts','companies','deals','tasks','leads','tickets']);
 // A shared Recycle Bin names the workspace and the editor's grant, like other shared writes.
 export const portableArchiveQuery=z.object({kind:portableArchiveKind.optional(),after:id.optional(),
   workspaceId:id.optional(),grantId:id.optional()}).strict().refine(value=>!value.workspaceId===!value.grantId);

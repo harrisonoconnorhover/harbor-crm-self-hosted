@@ -1,4 +1,6 @@
-import {and,asc,count,eq,isNotNull,isNull,sql} from 'drizzle-orm';
+import {readCommerceResult,type RecordAccessActor} from './record-access-store';
+import {matchesCommerceSearch,productSearchFields} from './commerce-search';
+import {and,asc,count,desc,eq,inArray,isNotNull,isNull,or,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {z} from 'zod';
 import {productData,type productMutation} from '../../lib/commerce';
@@ -10,36 +12,61 @@ import {privateWorkspaces} from './workspace-schema';
 const publicColumns={id:products.id,revision:products.revision,data:products.data,archivedAt:products.archivedAt,
   createdAt:products.createdAt,updatedAt:products.updatedAt};
 const productName=sql`lower(${products.data}->>'name')`;
-function matchingProducts(actorId:string,filters:PortableProductFilters){
-  return and(eq(privateWorkspaces.ownerId,actorId),filters.archived==='true'?isNotNull(products.archivedAt):isNull(products.archivedAt),
+// Mapped products retain their subscriber history even after a catalog change to one-time billing.
+function subscriptionPlanFilter(mappedIds?:string[]){
+  if(!mappedIds)return undefined;
+  return or(sql`${products.data}->>'billingFrequency'<>'one_time'`,mappedIds.length?inArray(products.id,mappedIds):undefined);
+}
+function matchingProducts(actorId:string,filters:PortableProductFilters,subscriptionPlanIds?:string[]){
+  return and(eq(products.workspaceId,sql`(SELECT ${privateWorkspaces.id} FROM ${privateWorkspaces} WHERE ${privateWorkspaces.ownerId}=${actorId})`),
+    subscriptionPlanFilter(subscriptionPlanIds),
+    filters.archived==='true'?isNotNull(products.archivedAt):isNull(products.archivedAt),
     filters.billingFrequency?sql`${products.data}->>'billingFrequency'=${filters.billingFrequency}`:undefined,
-    filters.q?sql`(strpos(${productName},lower(${filters.q}))>0 OR strpos(lower(${products.data}->>'sku'),lower(${filters.q}))>0)`:undefined);
+    matchesCommerceSearch(productSearchFields(products.data),filters.q));
 }
 function product({data,...row}:Omit<typeof products.$inferSelect,'workspaceId'>){
   return {...data,...row};
 }
 
-export function readPortableProduct(db:PostgresJsDatabase,actorId:string,id:string){
-  return db.select(publicColumns).from(products).innerJoin(privateWorkspaces,eq(products.workspaceId,privateWorkspaces.id))
-    .where(and(eq(privateWorkspaces.ownerId,actorId),eq(products.id,id))).limit(1)
-    .then(([row])=>row?product(row):null);
+export function readPortableProduct(db:PostgresJsDatabase,actor:RecordAccessActor,includeBody:boolean,id:string,workspaceId?:string,subscriptionPlanIds?:string[]){
+  return readCommerceResult(db,actor,'products',includeBody&&'detail',async tx=>{
+    return tx.select(publicColumns).from(products).innerJoin(privateWorkspaces,eq(products.workspaceId,privateWorkspaces.id))
+      .where(and(eq(privateWorkspaces.ownerId,actor.userId),workspaceId?eq(products.workspaceId,workspaceId):undefined,eq(products.id,id),subscriptionPlanFilter(subscriptionPlanIds))).limit(1)
+      .then(([row])=>row?product(row):null);
+  },result=>result?[result.id]:[]);
 }
 
-export function listPortableProducts(db:PostgresJsDatabase,actorId:string,query:PortableProductQuery):Promise<PortableProductPage>{
-  return db.transaction(async tx=>{
-    const match=matchingProducts(actorId,query);
-    const [{total}]=await tx.select({total:count()}).from(products)
-      .innerJoin(privateWorkspaces,eq(products.workspaceId,privateWorkspaces.id)).where(match);
-    const size=25,page=Math.min(query.page??0,Math.max(0,Math.ceil(total/size)-1));
-    const rows=await tx.select(publicColumns).from(products).innerJoin(privateWorkspaces,eq(products.workspaceId,privateWorkspaces.id))
-      .where(match).orderBy(asc(productName),asc(products.id)).limit(size).offset(page*size);
-    return {items:rows.map(product),total,page,size};
-  },{isolationLevel:'repeatable read',accessMode:'read only'});
+export function listPortableProducts(db:PostgresJsDatabase,actor:RecordAccessActor,includeBody:boolean,query:PortableProductQuery,subscriptionPlanIds?:string[]):Promise<PortableProductPage>{
+  return readCommerceResult(db,actor,'products',includeBody&&'list',async tx=>{
+    const match=matchingProducts(actor.userId,query,subscriptionPlanIds);
+    const size=25,backward=Boolean(query.before),cursor=query.after??query.before;
+    let total:number|null=null,page:number|null=null;
+    const order=backward?desc:asc;
+    let boundary;
+    if(cursor){
+      const name=Buffer.from(cursor.slice(37),'base64url').toString('utf8'),id=cursor.slice(0,36);
+      boundary=backward?sql`(${productName},${products.id}) < (${name},${id}::uuid)`:
+        sql`(${productName},${products.id}) > (${name},${id}::uuid)`;
+    }else{
+      const [counts]=await tx.select({total:count()}).from(products).where(match);
+      total=counts.total;
+      page=Math.min(query.page??0,Math.max(0,Math.ceil(total/size)-1));
+    }
+    const rows=await tx.select({record:publicColumns,sortName:productName.mapWith(String)}).from(products)
+      .where(and(match,boundary)).orderBy(order(productName),order(products.id)).limit(size+1).offset((page??0)*size);
+    const more=rows.length>size,visible=rows.slice(0,size);
+    if(backward)visible.reverse();
+    function position(row:typeof rows[number]|undefined){
+      return row?row.record.id+'.'+Buffer.from(row.sortName).toString('base64url'):null;
+    }
+    return {items:visible.map(({record})=>product(record)),total,page,size,
+      previous:(backward?more:Boolean(query.after)||(page??0)>0)?position(visible[0]):null,
+      next:(backward||more)?position(visible.at(-1)):null};
+  },result=>result.items.map(item=>item.id));
 }
 
 export async function listPortableProductsForExport(db:PostgresJsDatabase,actorId:string,filters:PortableProductFilters){
   const rows=await db.select(publicColumns).from(products)
-    .innerJoin(privateWorkspaces,eq(products.workspaceId,privateWorkspaces.id))
     .where(matchingProducts(actorId,filters)).orderBy(asc(productName),asc(products.id))
     .limit(portableProductExportLimit+1);
   return rows.length<=portableProductExportLimit?rows.map(product):null;

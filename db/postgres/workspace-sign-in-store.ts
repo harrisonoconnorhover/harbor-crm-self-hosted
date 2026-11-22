@@ -6,12 +6,13 @@ import {workspaceInvites} from './workspace-invite-schema';
 import {workspaceViewers} from './workspace-viewer-schema';
 import {privateWorkspaces} from './workspace-schema';
 
-type Account={subject:string;provider?:'google'|'microsoft'}|{userId:string};
+type Account={subject:string;provider?:'google'|'microsoft'|'saml'|'oidc'}|{userId:string};
 
 export async function workspaceSignInAllowed(db:PostgresJsDatabase,email:string,account:Account,ownerEmails:string[]){
   const owner=alias(loginIdentities,'invite_owner');
   const invitedBy=and(eq(privateWorkspaces.ownerId,owner.id),inArray(owner.email,ownerEmails));
-  const subject='subject' in account&&account.provider==='microsoft'?loginIdentities.microsoftSubject:loginIdentities.googleSubject;
+  const provider='subject' in account?account.provider:undefined;
+  const subject=provider==='oidc'?loginIdentities.oidcSubject:provider==='saml'?loginIdentities.samlSubject:provider==='microsoft'?loginIdentities.microsoftSubject:loginIdentities.googleSubject;
   const accountMatch='subject' in account?eq(subject,account.subject):eq(loginIdentities.id,account.userId);
   const otherAccount='subject' in account?sql`${subject} IS DISTINCT FROM ${account.subject}`:ne(loginIdentities.id,account.userId);
   const conflictingIdentity=db.select({id:loginIdentities.id}).from(loginIdentities)

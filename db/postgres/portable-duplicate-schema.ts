@@ -12,7 +12,7 @@ export const portableDuplicateDismissals=pgTable('portable_duplicate_dismissals'
   actorId:text('actor_id').notNull().references(()=>loginIdentities.id),
   createdAt:timestamp('created_at',{withTimezone:true,mode:'string'}).notNull(),
 },table=>[
-  primaryKey({columns:[table.workspaceId,table.recordA,table.recordB]}),
+  primaryKey({columns:[table.workspaceId,table.kind,table.recordA,table.recordB]}),
   index('portable_duplicate_dismissal_kind').on(table.workspaceId,table.kind),
   check('portable_duplicate_dismissal_order',sql`${table.recordA}<${table.recordB}`),
   check('portable_duplicate_dismissal_kind',sql`${table.kind} IN ('contacts','companies')`),

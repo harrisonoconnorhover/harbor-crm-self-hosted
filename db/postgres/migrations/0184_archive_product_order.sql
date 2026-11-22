@@ -1,0 +1,1 @@
+CREATE INDEX "portable_products_archive_catalog" ON "portable_products" USING btree ("workspace_id",lower("data"->>'name'),"id") WHERE "portable_products"."archived_at" IS NOT NULL;

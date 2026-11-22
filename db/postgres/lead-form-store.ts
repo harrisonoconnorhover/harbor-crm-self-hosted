@@ -1,9 +1,10 @@
 import {and,count,desc,eq,exists,gt,gte,ilike,inArray,not,or,sql,type SQL} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {z} from 'zod';
+import {recordAccess,type RecordAccessActor} from './record-access-store';
 import {ApiError} from '../../lib/api-error';
-import {LEAD_FORM_DAILY_LIMIT,LEAD_FORM_HOURLY_LIMIT,unmatchedLeadSubmissionStatuses,SupersededLeadFormError,type LeadFormPayload,type leadFormSubmit} from '../../lib/lead-forms';
-import {formNoteCapacityIssue,leadFormAutomationNote,type LeadFormNoteAutomation,type PortableInquiryFilter,type PortableLeadFormDefinition,type portableLeadFormAction} from '../../lib/portable-lead-forms';
+import {LEAD_FORM_DAILY_LIMIT,LEAD_FORM_HOURLY_LIMIT,unmatchedLeadSubmissionStatuses,SupersededLeadFormError,type leadFormSubmit} from '../../lib/lead-forms';
+import {formNoteCapacityIssue,leadFormAutomationNote,type PortableLeadFormPayload,type LeadFormNoteAutomation,type PortableInquiryFilter,type PortableLeadFormDefinition,type portableLeadFormAction} from '../../lib/portable-lead-forms';
 import type {ContactFields} from '../../lib/portable-records';
 import {contacts,contactEvents,privateWorkspaces} from './contact-schema';
 import {activeContact} from './contact-visibility';
@@ -13,11 +14,16 @@ import {jobOverdueAt} from './job-store';
 import {lockPortableInquiryToken} from './portable-api-token-store';
 import {leadFormActivations as active,leadFormNoteSources as sources,leadForms as forms,leadInquiries as inquiries} from './lead-form-schema';
 import {recordSearchPattern} from './record-search';
+import {attributeInquiry,attributionWindowMs,type AttributionHint} from './web-attribution-store';
+import {formConversions} from './web-attribution-schema';
+import {activeWorkspaceAssignee} from './workspace-assignee-store';
+import {routeFormContact} from './portable-lead-store';
+import {queueMarketingFormDeliveries} from './marketing-form-intake';
 
 type Db=PostgresJsDatabase;
 type Tx=Parameters<Parameters<Db['transaction']>[0]>[0];
 type Action=z.output<typeof portableLeadFormAction>;
-type Submission=z.output<typeof leadFormSubmit>;
+type Submission=Omit<z.output<typeof leadFormSubmit>,'payload'>&{payload:PortableLeadFormPayload};
 const unavailable=()=>new ApiError(404,'Form unavailable.');
 const changed=()=>new ApiError(409,'This form or request changed. Reload before trying again.');
 const formScope=(workspaceId:string,id:string)=>and(eq(forms.workspaceId,workspaceId),eq(forms.id,id));
@@ -33,7 +39,7 @@ const noteClaimExpired=sql<boolean>`${jobs.status}='running' AND ${jobs.leaseUnt
 const noteOverdue=or(formNoteOverdue,jobOverdueAt(noteClock),noteClaimExpired)!;
 const noteIssues=or(noteOverdue,openFormNoteCapacitySkip,
   sql`${jobs.status} IN ('failed','attention') AND ${jobs.operatorReviewedAt} IS NULL`)!;
-const timelineId=(definition:PortableLeadFormDefinition,payload:LeadFormPayload,contactId:string|null)=>
+const timelineId=(definition:PortableLeadFormDefinition,payload:PortableLeadFormPayload,contactId:string|null)=>
   definition.showMessageOnContact&&payload.message&&contactId?crypto.randomUUID():null;
 
 export async function listLeadForms(db:Db,actorId:string){
@@ -49,8 +55,19 @@ export async function listLeadForms(db:Db,actorId:string){
   return rows.map(({activation,...form})=>({...form,enabled:!!activation}));
 }
 
-export async function readLeadInquiries(db:Db,actorId:string,formId?:string,cursor?:{at:number;id:string},
-  filter:PortableInquiryFilter='all',inquirySearch?:string){
+type InquiryPageQuery={formId?:string;cursor?:{at:number;id:string};filter:PortableInquiryFilter;inquirySearch?:string;submissionId?:string};
+
+export function readLeadInquiries(db:Db,actor:RecordAccessActor,query:InquiryPageQuery,includeBody:boolean){
+  if(!includeBody)return inquiryPage(db,actor.userId,query);
+  return db.transaction(async tx=>{
+    const page=await inquiryPage(tx,actor.userId,query);
+    const contactIds=new Set(page.results.flatMap(row=>row.contactId?[row.contactId]:[]));
+    await recordAccess(tx,actor,'contacts','related',[...contactIds]);
+    return page;
+  },{isolationLevel:'repeatable read'});
+}
+
+async function inquiryPage(db:Db,actorId:string,{formId,cursor,filter,inquirySearch,submissionId}:InquiryPageQuery){
   if(formId){
     const [form]=await db.select({id:forms.id}).from(forms)
       .innerJoin(privateWorkspaces,eq(forms.workspaceId,privateWorkspaces.id))
@@ -58,7 +75,7 @@ export async function readLeadInquiries(db:Db,actorId:string,formId?:string,curs
     if(!form)throw unavailable();
   }
   const pattern=recordSearchPattern(inquirySearch);
-  const match=pattern?and(not(eq(inquiries.status,'removed')),
+  const match=pattern?and(sql`${inquiries.status} <> 'removed'`,
     or(ilike(sql`${inquiries.payload}->>'name'`,pattern),ilike(sql`${inquiries.payload}->>'email'`,pattern))):undefined;
   const rows=await db.select({
     id:inquiries.id,formId:inquiries.formId,formTitle:sql<string>`${forms.definition}->>'title'`,
@@ -67,14 +84,18 @@ export async function readLeadInquiries(db:Db,actorId:string,formId?:string,curs
     handled:inquiries.handled,triageRevision:inquiries.triageRevision,
     contactAvailable:exists(db.select({id:contacts.id}).from(contacts)
       .where(and(eq(contacts.workspaceId,inquiries.workspaceId),eq(contacts.id,inquiries.contactId),activeContact))).mapWith(Boolean),
+    journeySite:formConversions.siteId,
     noteState:sources.state,noteIssue:sources.issue,noteOverdue,noteClaimExpired,noteIssues,
     jobId:jobs.id,jobStatus:jobs.status,jobIssue:jobs.issue,
   }).from(inquiries)
     .innerJoin(privateWorkspaces,eq(inquiries.workspaceId,privateWorkspaces.id))
     .innerJoin(forms,and(eq(inquiries.workspaceId,forms.workspaceId),eq(inquiries.formId,forms.id)))
+    .leftJoin(formConversions,and(eq(formConversions.workspaceId,inquiries.workspaceId),eq(formConversions.inquiryId,inquiries.id),
+      gte(formConversions.convertedAt,Date.now()-attributionWindowMs)))
     .leftJoin(sources,and(eq(sources.workspaceId,inquiries.workspaceId),eq(sources.inquiryId,inquiries.id)))
     .leftJoin(jobs,and(eq(jobs.workspaceId,sources.workspaceId),eq(jobs.id,sources.jobId),eq(sources.state,'queued')))
-    .where(and(eq(privateWorkspaces.ownerId,actorId),formId?eq(inquiries.formId,formId):undefined,match,
+    .where(and(eq(privateWorkspaces.ownerId,actorId),formId?eq(inquiries.formId,formId):undefined,
+    submissionId?eq(inquiries.id,submissionId):undefined,match,
     filter==='unmatched'?inArray(inquiries.status,unmatchedLeadSubmissionStatuses):undefined,
     filter==='needs_review'?eq(inquiries.status,'needs_review'):undefined,
     filter==='open'||filter==='handled'?inquiryFollowUp(filter==='handled'):undefined,
@@ -83,7 +104,8 @@ export async function readLeadInquiries(db:Db,actorId:string,formId?:string,curs
     cursor?sql`(${inquiries.receivedAt},${inquiries.id}) < (${cursor.at},${cursor.id}::uuid)`:undefined))
     .orderBy(desc(inquiries.receivedAt),desc(inquiries.id)).limit(26);
   const last=rows[24];
-  const results=rows.slice(0,25).map(({noteState,noteIssue,noteOverdue,noteClaimExpired,noteIssues,jobId,jobStatus,jobIssue,...row})=>{
+  const results=rows.slice(0,25).map(({noteState,noteIssue,noteOverdue,noteClaimExpired,noteIssues,jobId,jobStatus,jobIssue,journeySite,...record})=>{
+    const row={...record,...(journeySite?{journeySite}:undefined)};
     if(!noteState||row.status==='removed')return row;
     const noteAutomation:LeadFormNoteAutomation={
       status:noteState!=='queued'?noteState:
@@ -103,20 +125,30 @@ export async function enabledLeadForm(db:Db,id:string){
   return form;
 }
 
-async function matchContact(tx:Tx,workspaceId:string,formId:string,payload:LeadFormPayload){
+async function matchContact(tx:Tx,workspaceId:string,formId:string,payload:PortableLeadFormPayload,routingFormTitle?:string){
   const emailMatch=and(eq(contacts.workspaceId,workspaceId),sql`lower(${contacts.data}->>'email')=${payload.email}`);
   const matches=await tx.select({id:contacts.id}).from(contacts)
     .where(and(emailMatch,activeContact)).limit(2).for('share');
   if(matches.length>1)return {status:'needs_review' as const,contactId:null,reviewReason:'duplicate_email' as const};
-  if(matches[0])return {status:'linked' as const,contactId:matches[0].id,reviewReason:null};
+  if(matches[0]){
+    if(routingFormTitle)await routeFormContact(tx,workspaceId,formId,matches[0].id,payload.name,routingFormTitle,{newContact:false,country:payload.country,region:payload.region});
+    return {status:'linked' as const,contactId:matches[0].id,reviewReason:null};
+  }
   // Archive changes take the same workspace lock as submissions and retries.
   // Leave an archived-only match for review without exposing or recreating it.
   const [archived]=await tx.select({id:contacts.id}).from(contacts)
     .where(and(emailMatch,not(activeContact))).limit(1);
   if(archived)return {status:'needs_review' as const,contactId:null,reviewReason:'archived_contact' as const};
   const contactId=crypto.randomUUID(),now=new Date().toISOString();
-  const data:ContactFields={name:payload.name,email:payload.email,phone:payload.phone,title:'',lifecycle:'Lead'};
+  const data:ContactFields={name:payload.name,email:payload.email,phone:payload.phone,title:'',lifecycle:'Lead',...(payload.country?{country:payload.country}:{}),...(payload.region?{state:payload.region}:{})};
   await tx.insert(contacts).values({workspaceId,id:contactId,revision:1,data,createdAt:now,updatedAt:now});
+  if(routingFormTitle){
+    const owner=await routeFormContact(tx,workspaceId,formId,contactId,payload.name,routingFormTitle,{newContact:true,country:payload.country,region:payload.region});
+    if(owner&&await activeWorkspaceAssignee(tx,workspaceId,owner.userId,{tool:'contacts'})){
+      data.recordOwner=owner;
+      await tx.update(contacts).set({data}).where(and(eq(contacts.workspaceId,workspaceId),eq(contacts.id,contactId)));
+    }
+  }
   await tx.insert(contactEvents).values({workspaceId,contactId,revision:1,intakeFormId:formId,data,occurredAt:now});
   return {status:'created' as const,contactId,reviewReason:null};
 }
@@ -134,7 +166,7 @@ export function manageLeadForm(db:Db,actorId:string,input:Action){
       const target=and(eq(inquiries.workspaceId,workspaceId),eq(inquiries.formId,input.formId),eq(inquiries.id,input.submissionId));
       const source=and(eq(sources.workspaceId,workspaceId),eq(sources.inquiryId,input.submissionId));
       const [receipt]=await tx.select({status:inquiries.status,payload:inquiries.payload,contactId:inquiries.contactId,
-        handled:inquiries.handled,triageRevision:inquiries.triageRevision}).from(inquiries).where(target);
+        handled:inquiries.handled,triageRevision:inquiries.triageRevision,routeLeadRevision:inquiries.routeLeadRevision}).from(inquiries).where(target);
       if(!receipt)throw unavailable();
       if(input.action==='setInquiryHandled'){
         if(receipt.status==='removed')throw unavailable();
@@ -147,6 +179,7 @@ export function manageLeadForm(db:Db,actorId:string,input:Action){
         return {ok:true};
       }
       if(input.action==='removeInquiry'&&receipt.status!=='removed'){
+        await tx.delete(formConversions).where(and(eq(formConversions.workspaceId,workspaceId),eq(formConversions.inquiryId,input.submissionId)));
         await tx.update(inquiries).set({status:'removed',payload:null,fingerprint:null,contactId:null,reviewReason:null,
           timelineNoteId:null,handled:false,removedAt:Date.now()}).where(target);
         await tx.update(sources).set({state:'skipped',nextAt:null,retryAt:null,contactId:null,issue:'Inquiry was removed.'})
@@ -156,10 +189,11 @@ export function manageLeadForm(db:Db,actorId:string,input:Action){
       if(input.action==='retry'&&(receipt.status==='needs_review'||receipt.status==='inbox_only')&&receipt.payload){
         const [form]=await tx.select(formFields).from(forms).where(formScope(workspaceId,input.formId));
         if(!form)throw unavailable();
-        const match=await matchContact(tx,workspaceId,input.formId,receipt.payload);
+        const [enabled]=await tx.select({id:active.formId}).from(active).where(eq(active.formId,form.id));
+        const route=enabled&&form.definition.routeSalesLead&&receipt.routeLeadRevision===form.revision;
+        const match=await matchContact(tx,workspaceId,input.formId,receipt.payload,route?form.definition.title:undefined);
         await tx.update(inquiries).set({...match,timelineNoteId:timelineId(form.definition,receipt.payload,match.contactId)}).where(target);
         if(match.contactId){
-          const [enabled]=await tx.select({id:active.formId}).from(active).where(eq(active.formId,form.id));
           const awaiting=and(source,eq(sources.state,'awaiting_contact'));
           if(enabled&&leadFormAutomationNote(form.definition)){
             await tx.update(sources).set({state:'waiting',contactId:match.contactId,nextAt:databaseTime,retryAt:null})
@@ -177,6 +211,8 @@ export function manageLeadForm(db:Db,actorId:string,input:Action){
       return {ok:true};
     }
     const [form]=await tx.select(formFields).from(forms).where(formScope(workspaceId,input.id));
+    if(input.action==='save'&&input.definition.collectRegion===true&&(input.definition.collectCountry??form?.definition.collectCountry)!==true)
+      throw new ApiError(400,'Enable country collection to ask for a state or province.');
     if(creating){
       if(form){
         if(Object.entries(input.definition).some(([key,value])=>form.definition[key as keyof PortableLeadFormDefinition]!==value))throw changed();
@@ -193,6 +229,9 @@ export function manageLeadForm(db:Db,actorId:string,input:Action){
     if(form.revision!==input.revision||form.revision>=2147483647)throw changed();
     await tx.update(forms).set({revision:form.revision+1,...(input.action==='save'?{definition:{...input.definition,
       captureContacts:input.definition.captureContacts??form.definition.captureContacts??true,
+      collectCountry:input.definition.collectCountry??form.definition.collectCountry,
+      collectRegion:input.definition.collectCountry===false?false:input.definition.collectRegion??form.definition.collectRegion,
+      routeSalesLead:input.definition.captureContacts===false?false:input.definition.routeSalesLead??form.definition.routeSalesLead,
       showMessageOnContact:input.definition.showMessageOnContact??form.definition.showMessageOnContact}}:{})})
       .where(formScope(workspaceId,input.id));
     await tx.update(sources).set({state:'skipped',nextAt:null,retryAt:null,issue:settingsChanged})
@@ -205,7 +244,7 @@ export function manageLeadForm(db:Db,actorId:string,input:Action){
   });
 }
 
-export function submitLeadInquiry(db:Db,formId:string,workspaceId:string,input:Submission,fingerprint:string,tokenId?:string){
+export function submitLeadInquiry(db:Db,formId:string,workspaceId:string,input:Submission,fingerprint:string,tokenId?:string,attribution?:AttributionHint){
   async function readAdmission(tx:Tx){
     // The same workspace lock serializes settings, submission IDs, quota and public email matching.
     const [workspace]=await tx.select({ownerId:privateWorkspaces.ownerId}).from(privateWorkspaces)
@@ -225,6 +264,10 @@ export function submitLeadInquiry(db:Db,formId:string,workspaceId:string,input:S
     if(receipt)return;
     if(form.revision>input.revision&&!tokenId)throw new SupersededLeadFormError();
     if(form.revision!==input.revision)throw changed();
+    if(input.payload.region!==undefined&&!form.definition.collectRegion)
+      throw new ApiError(400,'This form does not collect state or province.');
+    if(input.payload.country!==undefined&&!form.definition.collectCountry)
+      throw new ApiError(400,'This form does not collect country or region.');
     const [{at}]=await tx.select({at:databaseTime}).from(sql`(select 1) as clock`);
     const day=Math.floor(at/86_400_000)*86_400_000;
     const scope=eq(inquiries.workspaceId,workspaceId);
@@ -235,9 +278,13 @@ export function submitLeadInquiry(db:Db,formId:string,workspaceId:string,input:S
       throw new ApiError(429,'This form is receiving too many inquiries. Try again later.');
     // Old definitions omitted this setting and captured contacts automatically.
     const match=form.definition.captureContacts===false?{status:'inbox_only' as const,contactId:null}:
-      await matchContact(tx,workspaceId,formId,input.payload);
+      await matchContact(tx,workspaceId,formId,input.payload,form.definition.routeSalesLead?form.definition.title:undefined);
     await tx.insert(inquiries).values({workspaceId,id:input.id,formId,receivedAt:at,payload:input.payload,fingerprint,
-      ...match,timelineNoteId:timelineId(form.definition,input.payload,match.contactId)});
+      routeLeadRevision:form.definition.routeSalesLead?form.revision:null,...match,timelineNoteId:timelineId(form.definition,input.payload,match.contactId)});
+    if(attribution&&!tokenId)await attributeInquiry(tx,workspaceId,input.id,at,attribution);
+    if(process.env.HARBOR_MARKETING_WORKSPACE_ID?.toLowerCase()===workspaceId){
+      await queueMarketingFormDeliveries(tx,workspaceId,formId,input.id,at);
+    }
     if(leadFormAutomationNote(form.definition)){
       const [pending]=await tx.select({count:count()}).from(sources).where(and(eq(sources.workspaceId,workspaceId),pendingNotes));
       const full=pending.count>=maxPendingNotes;

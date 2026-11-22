@@ -1,0 +1,6 @@
+ALTER TABLE "portable_activity_creation_receipts" ADD COLUMN "outlook_contact_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_activity_creation_receipts" ADD COLUMN "outlook_mailbox" text;--> statement-breakpoint
+ALTER TABLE "portable_activity_creation_receipts" ADD COLUMN "outlook_received_at" bigint;--> statement-breakpoint
+CREATE INDEX "portable_outlook_contact_received" ON "portable_activity_creation_receipts" USING btree ("workspace_id","outlook_contact_id","outlook_mailbox","outlook_received_at") WHERE "portable_activity_creation_receipts"."outlook_received_at" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_activity_creation_receipts" ADD CONSTRAINT "portable_outlook_reply_receipt" CHECK (num_nonnulls("portable_activity_creation_receipts"."outlook_contact_id","portable_activity_creation_receipts"."outlook_mailbox","portable_activity_creation_receipts"."outlook_received_at") = 0 OR
+    ("portable_activity_creation_receipts"."namespace"='contact' AND "portable_activity_creation_receipts"."fingerprint" LIKE 'outlook:%' AND num_nonnulls("portable_activity_creation_receipts"."outlook_contact_id","portable_activity_creation_receipts"."outlook_mailbox","portable_activity_creation_receipts"."outlook_received_at") = 3));

@@ -1,0 +1,2 @@
+ALTER TABLE "portable_duplicate_dismissals" DROP CONSTRAINT "portable_duplicate_dismissals_workspace_id_record_a_record_b_pk";--> statement-breakpoint
+ALTER TABLE "portable_duplicate_dismissals" ADD CONSTRAINT "portable_duplicate_dismissals_workspace_id_kind_record_a_record_b_pk" PRIMARY KEY("workspace_id","kind","record_a","record_b");

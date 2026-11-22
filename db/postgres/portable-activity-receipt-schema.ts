@@ -8,8 +8,15 @@ export const portableActivityCreationReceipts=pgTable('portable_activity_creatio
   namespace:text('namespace').$type<'contact'|'record'>().notNull(),
   id:uuid('id').notNull(),
   fingerprint:text('fingerprint').notNull(),
+  outlookContactId:uuid('outlook_contact_id'),
+  outlookMailbox:text('outlook_mailbox'),
+  outlookReceivedAt:bigint('outlook_received_at',{mode:'number'}),
 },table=>[
   primaryKey({columns:[table.workspaceId,table.namespace,table.id]}),
+  index('portable_outlook_contact_received').on(table.workspaceId,table.outlookContactId,table.outlookMailbox,table.outlookReceivedAt)
+    .where(sql`${table.outlookReceivedAt} IS NOT NULL`),
+  check('portable_outlook_reply_receipt',sql`num_nonnulls(${table.outlookContactId},${table.outlookMailbox},${table.outlookReceivedAt}) = 0 OR
+    (${table.namespace}='contact' AND ${table.fingerprint} LIKE 'outlook:%' AND num_nonnulls(${table.outlookContactId},${table.outlookMailbox},${table.outlookReceivedAt}) = 3)`),
   check('portable_activity_receipt_namespace',sql`${table.namespace} IN ('contact','record')`),
 ]);
 

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "portable_directory_group_name" ON "portable_directory_groups" USING btree ("workspace_id","tenant",lower("display_name")) WHERE "portable_directory_groups"."group_id" IS NOT NULL;

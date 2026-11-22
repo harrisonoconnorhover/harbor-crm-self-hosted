@@ -13,8 +13,9 @@ export function AvailabilityCard({children}:{children:ReactNode}){
   return <main className="lead-form-page"><section className="lead-form-card">{children}</section></main>;
 }
 
-export function GuestBookingForm({id,slots}:{id:string;slots:{start:string;label:string}[]}){
+export function GuestBookingForm({id,slots,refreshAlternatives}:{id:string;slots:{start:string;label:string}[];refreshAlternatives?:()=>void}){
   const [stage,setStage]=useState<'request'|'verify'|'done'>('request');
+  const [replacement,setReplacement]=useState<{code:string;unavailable:string[]}|null>(null);
   const [requestId,setRequestId]=useState('');
   const [receipt,setReceipt]=useState('');
   const [busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -38,7 +39,7 @@ export function GuestBookingForm({id,slots}:{id:string;slots:{start:string;label
   },[storageKey]);
 
   function clearAttempt(){
-    attempt.current=null;
+    setReplacement(null);attempt.current=null;
     setRequestId('');
     try{sessionStorage.removeItem(storageKey);}catch{/* Browser storage may be blocked. */}
   }
@@ -47,7 +48,7 @@ export function GuestBookingForm({id,slots}:{id:string;slots:{start:string;label
     event.preventDefault();
     if(submitting.current||stage==='done')return;
     const fields=new FormData(event.currentTarget);
-    let input:GuestBookingInput;
+    let input:GuestBookingInput & {alternativeStart?:string};
     let newAttempt=false;
     if(stage==='request'){
       const email=String(fields.get('email')),start=String(fields.get('start'));
@@ -62,7 +63,8 @@ export function GuestBookingForm({id,slots}:{id:string;slots:{start:string;label
       input={action:'request',...attempt.current};
     }else{
       if(!requestId)return;
-      input={action:'verify',requestId,code:String(fields.get('code')).trim()};
+      input=replacement?{action:'verify',requestId,code:replacement.code,alternativeStart:String(fields.get('alternativeStart'))}
+        :{action:'verify',requestId,code:String(fields.get('code')).trim()};
     }
     submitting.current=true;setBusy(true);setError('');
     try{
@@ -70,6 +72,12 @@ export function GuestBookingForm({id,slots}:{id:string;slots:{start:string;label
         headers:{'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(30_000)});
       if(newAttempt&&rejectedBeforeRequest.has(response.status))clearAttempt();
       const result=await response.json() as {error?:string;accepted?:boolean;verified?:boolean;receipt?:string};
+      if(response.status===409&&input.action==='verify'&&refreshAlternatives){
+        const lost=input.alternativeStart??attempt.current?.start;
+        setReplacement({code:input.code,unavailable:[...new Set([...(replacement?.unavailable??[]),...(lost?[lost]:[])])]});
+        refreshAlternatives();
+        throw Error('That time was taken. Choose another opening with the same verification code.');
+      }
       if(!response.ok||!(input.action==='request'?result.accepted:result.verified&&result.receipt)){
         throw Error(result.error||'Could not confirm the request. Try again with the same details.');
       }
@@ -84,6 +92,7 @@ export function GuestBookingForm({id,slots}:{id:string;slots:{start:string;label
     <BookingStatus receipt={receipt}/>
   </>;
   if(stage==='request'&&!slots.length)return <p>There are no open times on this page.</p>;
+  const alternatives=replacement?slots.filter(slot=>!replacement.unavailable.includes(slot.start)):[];
   return <form onSubmit={submit}>
     <fieldset key={stage} disabled={busy}>
       {stage==='request'?<>
@@ -92,13 +101,17 @@ export function GuestBookingForm({id,slots}:{id:string;slots:{start:string;label
           {slots.map(slot=><option key={slot.start} value={slot.start}>{slot.label}</option>)}
         </select></label>
         <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254}/></label>
-      </>:<>
+      </>:replacement&&!alternatives.length?<><p>There are no other open times on this page.</p>
+        <button type="button" onClick={refreshAlternatives}>Refresh times</button></>:replacement?<label>New meeting time<select name="alternativeStart" key={replacement.unavailable.join(',')} required defaultValue="">
+        <option value="">Choose another time</option>
+        {alternatives.map(slot=><option key={slot.start} value={slot.start}>{slot.label}</option>)}
+      </select></label>:<>
         <p>If your code arrived, enter it here. Codes expire within {guestProofMinutes} minutes.</p>
         <label>Verification code<input name="code" autoComplete="one-time-code" required maxLength={43}/></label>
       </>}
     </fieldset>
     {error&&<p role="alert">{error}</p>}
-    <button disabled={busy}>{busy?'Checking…':stage==='request'?'Email me a code':'Verify email'}</button>
+    <button disabled={busy||Boolean(replacement&&!alternatives.length)}>{busy?'Checking…':stage==='request'?'Email me a code':replacement?'Reserve new time':'Verify email'}</button>
     {stage==='request'&&requestId&&error&&<button className="lead-form-secondary" type="button" disabled={busy} onClick={()=>{setError('');setStage('verify');}}>Enter a code</button>}
     {stage==='verify'&&<button className="lead-form-secondary" type="button" disabled={busy} onClick={()=>{clearAttempt();setError('');setStage('request');}}>Start over</button>}
   </form>;

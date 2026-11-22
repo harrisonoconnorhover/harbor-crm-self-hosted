@@ -58,7 +58,7 @@ export async function verifyPortableInvitations({request,origin,headers,other,si
   const invitee=await signIn(email);
   try{
     const pending=await listing(invitee);
-    assert.deepEqual(pending.incoming,[{id:first.id,ownerEmail:'owner@example.test',role:'viewer',expiresAt:first.expiresAt}]);
+    assert.deepEqual(pending.incoming,[{id:first.id,ownerEmail:'owner@example.test',role:'viewer',viewScope:'all',editScope:'all',expiresAt:first.expiresAt}]);
     const normalHome=async auth=>{
       const response=await request('/',{headers:auth});
       await assertStatus(response,200,'Open ordinary Contacts home');
@@ -225,7 +225,7 @@ export async function verifyPortableInvitations({request,origin,headers,other,si
     assert.deepEqual((await (await invite(email,'editor')).json()).sent,[editorInvite]);
     const conflict=await invite();
     await assertStatus(conflict,409,'Reject a role change on an existing invitation');
-    assert.match((await conflict.json()).error,/different role is pending/);
+    assert.match((await conflict.json()).error,/different access is pending/);
     assert.deepEqual((await listing(headers)).sent,[editorInvite]);
     await assertStatus(await changeRole(editorInvite.id,'viewer',{}),401,'Require sign-in to change the invitation role');
     await assertStatus(await changeRole(editorInvite.id,'viewer',other),404,'Reject a role change by a non-owner');

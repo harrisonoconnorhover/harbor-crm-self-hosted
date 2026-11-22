@@ -1,0 +1,4 @@
+ALTER TABLE "portable_standard_property_access" DROP CONSTRAINT "portable_standard_property_key";--> statement-breakpoint
+ALTER TABLE "portable_standard_property_access" ADD CONSTRAINT "portable_standard_property_key" CHECK (("portable_standard_property_access"."kind"='contacts' AND "portable_standard_property_access"."id" IN ('mobilePhone','address','address2','description'))
+    OR ("portable_standard_property_access"."kind"='companies' AND "portable_standard_property_access"."id" IN ('annualRevenue','numberOfEmployees','address','address2','description'))
+    OR ("portable_standard_property_access"."kind"='deals' AND "portable_standard_property_access"."id" IN ('amount','closedWonReason','closedLostReason','nextStep','description')));

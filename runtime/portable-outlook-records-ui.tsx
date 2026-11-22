@@ -1,5 +1,6 @@
 'use client';
 
+import {WorkspaceDate} from './portable-workspace-format';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import type {OutlookLookup,OutlookRecordPreview,OutlookRecordProvider,OutlookRecordResults} from '../lib/outlook-records';
 import './portable-outlook-records.css';
@@ -35,8 +36,8 @@ export function PortableOutlookRecords({recordId,contactEmail,mail,calendar,onLo
         const payload=await response.json() as {logged?:boolean;alreadyLogged?:boolean};
         if(controller.signal.aborted)return;
         if(payload.logged!==true)throw Error('Could not confirm the log. Check the contact timeline.');
-        setResults(previous=>previous&&({...previous,items:previous.items.map(row=>row.selection===item.selection?{...row,logged:true}:row)}));
-        setAttendance('');setStatus(payload.alreadyLogged?'This item was already recorded.':isMail?'Email logged on this contact.':'Meeting logged on this contact.');
+        setResults(previous=>previous&&({...previous,items:previous.items.map(row=>row.selection===item.selection?{...row,logged:true,canConfirmReply:false}:row)}));
+        setAttendance('');setStatus(item.canConfirmReply?'Reply confirmed for sales sequences.':payload.alreadyLogged?'This item was already recorded.':isMail?'Email logged on this contact.':'Meeting logged on this contact.');
         onLogged();
       }else{
         const payload=await response.json() as OutlookRecordResults;
@@ -76,12 +77,13 @@ export function PortableOutlookRecords({recordId,contactEmail,mail,calendar,onLo
       {results.items.length>0&&<ul aria-label="Matching Outlook items">{results.items.map(item=><li key={item.selection}>
         <div className="portable-outlook-item">
           <strong>{item.subject}</strong>
-          <time dateTime={new Date(item.occurredAt).toISOString()}>{displayDate.format(item.occurredAt)}</time>
+          <time dateTime={new Date(item.occurredAt).toISOString()}><WorkspaceDate value={item.occurredAt}>{displayDate.format(item.occurredAt)}</WorkspaceDate></time>
           {item.excerpt&&<p>{item.excerpt}</p>}
           {!item.logged&&!isMail&&<label className="portable-outlook-attendance"><input type="checkbox" checked={attendance===item.selection} disabled={busy}
             onChange={event=>setAttendance(event.target.checked?item.selection:'')}/>I attended this meeting with {contactEmail}.</label>}
         </div>
-        {item.logged?<span>Already recorded</span>:
+        {item.canConfirmReply?<button type="button" disabled={busy} onClick={()=>void request(item)}>Confirm reply for sequences</button>:
+          item.logged?<span>Already recorded</span>:
           <button type="button" disabled={busy||!isMail&&attendance!==item.selection} onClick={()=>void request(item)}>{isMail?'Log email':'Log attended meeting'}</button>}
       </li>)}</ul>}
     </>}

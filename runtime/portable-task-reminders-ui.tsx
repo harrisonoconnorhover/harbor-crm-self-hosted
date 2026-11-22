@@ -1,5 +1,6 @@
 'use client';
 
+import {WorkspaceDate} from './portable-workspace-format';
 import {Bell,X} from 'lucide-react';
 import {useEffect,useId,useRef,useState} from 'react';
 import type {TaskReminder,TaskReminders} from '../lib/portable-task-reminders';
@@ -107,7 +108,7 @@ export function PortableTaskReminders({workspaceId}:{workspaceId?:string}){
       {readError?<p role="alert">{readError} <button type="button" onClick={refreshTaskReminders}>Retry</button></p>:
         !inbox?<p role="status">Checking reminders…</p>:count===0?<p>No task reminders due in this workspace.</p>:
         <ul>{inbox.items.map(item=><li key={item.id}>
-          <div><a href={taskHref(item.id)}>{item.name}</a><small>Due <time dateTime={item.dueAt}>{dueLabel(item)}</time></small></div>
+          <div><a href={taskHref(item.id)}>{item.name}</a><small>Due <time dateTime={item.dueAt}><WorkspaceDate value={item.dueAt}>{dueLabel(item)}</WorkspaceDate></time></small></div>
           <button type="button" aria-label={'Dismiss reminder for '+item.name} disabled={!!dismissing}
             onClick={()=>void dismiss(item)}>Dismiss</button>
         </li>)}</ul>}
@@ -116,7 +117,7 @@ export function PortableTaskReminders({workspaceId}:{workspaceId?:string}){
     </section>}
     {notice&&<aside className="portable-reminder-toast" aria-label="Task reminder">
       <div role="status"><strong>Task reminder</strong><a href={taskHref(notice.id)}>{notice.name}</a>
-        <small>Due <time dateTime={notice.dueAt}>{dueLabel(notice)}</time></small></div>
+        <small>Due <time dateTime={notice.dueAt}><WorkspaceDate value={notice.dueAt}>{dueLabel(notice)}</WorkspaceDate></time></small></div>
       <button type="button" className="portable-reminder-hide" aria-label="Hide reminder notice"
         onClick={()=>setHiddenNotice(reminderKey(notice))}><X size={16} aria-hidden="true"/></button>
       <button type="button" className="portable-reminder-dismiss" disabled={!!dismissing} onClick={()=>void dismiss(notice)}>Dismiss reminder</button>

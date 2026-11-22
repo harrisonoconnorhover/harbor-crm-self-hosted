@@ -82,6 +82,10 @@ export async function verifyPortableBoard({request,origin,headers,other,sql,shar
   const viewCard=viewerHtml.match(/<a[^>]*class="portable-deal-card-title" href="([^"]+)"[^>]*>Board fixture 1<\/a>/)?.[1];
   assert.ok(viewCard);
   const viewCardParams=new URL(viewCard.replaceAll('&amp;','&'),origin).searchParams;
+  const back=new URL(viewCardParams.get('back'),origin);
+  assert.equal(back.searchParams.get('workspaceId'),sharing.workspaceId);
+  assert.equal(back.searchParams.get('view'),'board');
+  viewCardParams.delete('back');
   assert.deepEqual([...viewCardParams].sort(),Object.entries({
     kind:'deals',record:ids[0],workspaceId:sharing.workspaceId,
   }).sort());

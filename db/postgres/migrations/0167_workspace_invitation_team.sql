@@ -1,0 +1,4 @@
+ALTER TABLE "portable_workspace_invites" ADD COLUMN "team_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_workspace_invites" ADD COLUMN "delegated_team" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_workspace_invites" ADD CONSTRAINT "portable_invitation_team" FOREIGN KEY ("workspace_id","team_id") REFERENCES "public"."portable_workspace_teams"("workspace_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portable_workspace_invites" ADD CONSTRAINT "portable_invitation_delegated_team" CHECK (NOT "portable_workspace_invites"."delegated_team" OR "portable_workspace_invites"."team_id" IS NOT NULL);

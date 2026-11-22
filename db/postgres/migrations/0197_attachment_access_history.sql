@@ -1,0 +1,9 @@
+ALTER TABLE "portable_record_access_events" DROP CONSTRAINT "record_access_action";--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD COLUMN "file_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD COLUMN "file_version_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD COLUMN "file_revision" integer;--> statement-breakpoint
+CREATE INDEX "record_access_file_time" ON "portable_record_access_events" USING btree ("workspace_id","file_id","occurred_at","id") WHERE "portable_record_access_events"."file_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD CONSTRAINT "record_access_file_version" CHECK ((CASE WHEN "portable_record_access_events"."kind"='contacts' AND "portable_record_access_events"."action"='document'
+    THEN "portable_record_access_events"."file_id" IS NOT NULL AND "portable_record_access_events"."file_version_id" IS NOT NULL AND "portable_record_access_events"."file_revision" IS NOT NULL AND "portable_record_access_events"."file_revision">0
+    ELSE "portable_record_access_events"."file_id" IS NULL AND "portable_record_access_events"."file_version_id" IS NULL AND "portable_record_access_events"."file_revision" IS NULL END));--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD CONSTRAINT "record_access_action" CHECK (("portable_record_access_events"."action" IN ('detail','list','csv','integration','search','report','related','history') OR ("portable_record_access_events"."action"='document' AND "portable_record_access_events"."kind" IN ('contacts','quotes','invoices'))) AND (("portable_record_access_events"."token_id" IS NOT NULL) = ("portable_record_access_events"."action"='integration')));

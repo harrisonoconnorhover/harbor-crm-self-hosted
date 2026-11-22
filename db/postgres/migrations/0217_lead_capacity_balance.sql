@@ -1,0 +1,1 @@
+ALTER TABLE "private_workspaces" ADD COLUMN "balance_leads_by_capacity" boolean DEFAULT false NOT NULL;

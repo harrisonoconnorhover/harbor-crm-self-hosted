@@ -1,0 +1,1 @@
+CREATE INDEX "object_record_property_search" ON "portable_object_records" USING gin ((public.harbor_search_values("data"->'values') COLLATE "C") public.gin_trgm_ops);

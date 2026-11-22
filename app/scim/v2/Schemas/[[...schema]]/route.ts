@@ -1,0 +1,1 @@
+export const dynamic="force-dynamic"; export {portableDirectory as GET,portableDirectory as POST,portableDirectory as PATCH,portableDirectory as PUT,portableDirectory as DELETE} from "../../../../../runtime/portable-directory";

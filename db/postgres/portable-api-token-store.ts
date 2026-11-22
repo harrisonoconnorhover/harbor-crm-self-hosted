@@ -1,8 +1,8 @@
 import {and,desc,eq,isNull,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {z} from 'zod';
-import {digest,newToken,tokenScopes,type ApiTokenInfo} from '../../lib/api-access';
-import type {portableTokenCreate,portableTokenPage} from '../../lib/portable-api-tokens';
+import {digest,newToken,type ApiTokenInfo} from '../../lib/api-access';
+import {portableTokenScopes,type portableTokenCreate,type portableTokenPage} from '../../lib/portable-api-tokens';
 import {loginIdentities} from './identity-schema';
 import {portableApiTokens as tokens} from './portable-api-token-schema';
 import {lockRecordWorkspace} from './private-workspace-store';
@@ -30,14 +30,14 @@ export async function readPortableApiTokens(db:PostgresJsDatabase,actorId:string
   return {tokens:page.map(info),next:rows.length>limit&&last?{afterAt:last.createdAt,afterId:last.id}:null};
 }
 
-export async function createPortableApiToken(tx:Transaction,actorId:string,input:z.infer<typeof portableTokenCreate>){
+export async function createPortableApiToken(tx:Transaction,actorId:string,input:z.infer<typeof portableTokenCreate>,directoryScope?:string){
   const token=newToken(),tokenHash=await digest(token);
   const workspaceId=await lockRecordWorkspace(tx,actorId,true);
   if(!workspaceId)throw Error('API token workspace is unavailable.');
   const createdAt=Date.now();
   const [row]=await tx.insert(tokens).values({
     id:crypto.randomUUID(),workspaceId,issuerId:actorId,name:input.name,prefix:token.slice(0,15),tokenHash,
-    scopes:tokenScopes(input.objects,input.permission),createdAt,expiresAt:createdAt+input.days*86_400_000,
+    scopes:portableTokenScopes(input,directoryScope),createdAt,expiresAt:createdAt+input.days*86_400_000,
   }).returning(fields);
   return {token,info:info(row)};
 }
@@ -50,12 +50,13 @@ export async function revokePortableApiToken(tx:Transaction,actorId:string,id:st
   return !!row||(await tx.select({id:tokens.id}).from(tokens).where(target)).length>0;
 }
 
-export async function currentPortableApiToken(db:PostgresJsDatabase,tokenHash:string){
-  const [row]=await db.select({
+export async function currentPortableApiToken(db:PostgresJsDatabase,tokenHash:string,lock=false){
+  const query=db.select({
     id:tokens.id,workspaceId:tokens.workspaceId,ownerId:workspaces.ownerId,email:loginIdentities.email,scopes:tokens.scopes,
   }).from(tokens).innerJoin(workspaces,workspaceJoin)
     .innerJoin(loginIdentities,eq(loginIdentities.id,workspaces.ownerId))
     .where(and(eq(tokens.tokenHash,tokenHash),isNull(tokens.revokedAt),sql`${tokens.expiresAt} > ${clock}`)).limit(1);
+  const [row]=await (lock?query.for('share',{of:tokens}):query);
   return row;
 }
 

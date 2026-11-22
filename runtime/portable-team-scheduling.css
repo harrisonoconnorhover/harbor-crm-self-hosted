@@ -1,0 +1,14 @@
+.portable-team-scheduling .team-host-notice {
+  margin: .5rem 0;
+  padding: .6rem .85rem;
+  border-inline-start: 3px solid #bc8330;
+  border-radius: 4px;
+  background: #fff8ea;
+  color: #614725;
+  overflow-wrap: anywhere;
+}
+
+.portable-team-scheduling .team-host-notice ul {
+  margin: .25rem 0 0;
+  padding-inline-start: 1.2rem;
+}

@@ -1,0 +1,5 @@
+ALTER TABLE "portable_tickets" ADD COLUMN "assignee_id" text;--> statement-breakpoint
+ALTER TABLE "portable_tickets" ADD COLUMN "assignee_label" text;--> statement-breakpoint
+ALTER TABLE "portable_tickets" ADD CONSTRAINT "portable_tickets_assignee_id_login_identities_id_fk" FOREIGN KEY ("assignee_id") REFERENCES "public"."login_identities"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "portable_tickets_workspace_assignee" ON "portable_tickets" USING btree ("workspace_id","assignee_id","id") WHERE "portable_tickets"."archived_at" IS NULL AND "portable_tickets"."assignee_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_tickets" ADD CONSTRAINT "portable_tickets_assignee_label" CHECK (("portable_tickets"."assignee_id" IS NULL) = ("portable_tickets"."assignee_label" IS NULL));

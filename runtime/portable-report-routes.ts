@@ -1,6 +1,6 @@
-import {evaluatePortableReport,readPortableReports,writePortableReport} from '../db/postgres/portable-report-store';
+import {evaluatePortableReport,readPortableReportRecords,readPortableReports,writePortableReport} from '../db/postgres/portable-report-store';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
-import {portableReportRead,portableReportWrite} from '../lib/portable-reports';
+import {portableReportRead,portableReportWrite,portableSavedReportRecords} from '../lib/portable-reports';
 import {portableApiIdentity} from './portable-api-identity';
 import {portableReportCsvResponse} from './portable-report-csv';
 import {portableDb} from './portable-db';
@@ -20,7 +20,19 @@ async function reportRoute(request:Request){
     if(request.method==='GET'||request.method==='HEAD'){
       if(params.size!==new Set(params.keys()).size)return json({error:'Invalid report query.'},400);
       const queryObject=Object.fromEntries(params);
-      if(queryObject.view==='dashboards'||queryObject.view==='dashboard'||queryObject.view==='dashboardRecords')return await dashboardRead(db,user.userId,queryObject);
+      if(queryObject.view==='dashboards'||queryObject.view==='dashboard'||queryObject.view==='dashboardRecords')return await dashboardRead(db,user,queryObject,request.method==='GET');
+      if(queryObject.view==='reportRecords'){
+        const input=portableSavedReportRecords.safeParse(queryObject);
+        if(!input.success)return json({error:'Invalid matching record query.'},400);
+        const {id,revision,group,after}=input.data;
+        return await db.transaction(async tx=>{
+          const item=await readPortableReports(tx,user.userId,{id});
+          if(!item||'items' in item)return json({error:errors.missing.message},404);
+          if(item.revision!==revision)return json({error:'This report changed. Reload it to see the current records.'},409);
+          if(group!==undefined&&!item.definition.groupBy)return json({error:'This report has no grouping.'},400);
+          return json(await readPortableReportRecords(tx,user,item.definition,{group,after},request.method==='GET'));
+        },{isolationLevel:'repeatable read'});
+      }
       const query=portableReportRead.safeParse(queryObject);
       if(!query.success)return json({error:'Invalid report query.'},400);
       const result=await readPortableReports(db,user.userId,query.data);

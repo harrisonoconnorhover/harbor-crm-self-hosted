@@ -1,0 +1,5 @@
+CREATE INDEX "contacts_list_search" ON "contacts" USING gin (("data"->>'name') public.gin_trgm_ops,("data"->>'email') public.gin_trgm_ops) WHERE "contacts"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "companies_list_search" ON "companies" USING gin (("data"->>'name') public.gin_trgm_ops,("data"->>'domain') public.gin_trgm_ops) WHERE "companies"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "deals_list_search" ON "deals" USING gin (("data"->>'name') public.gin_trgm_ops) WHERE "deals"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "portable_leads_list_search" ON "portable_leads" USING gin (("data"->>'name') public.gin_trgm_ops) WHERE "portable_leads"."archived_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "portable_tickets_list_search" ON "portable_tickets" USING gin (("data"->>'name') public.gin_trgm_ops,("data"->>'description') public.gin_trgm_ops) WHERE "portable_tickets"."archived_at" IS NULL;

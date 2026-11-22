@@ -1,3 +1,4 @@
+import {portablePageHasBody} from './portable-page-body';
 import {withPortableNavigation} from './portable-navigation';
 import {notFound} from 'next/navigation';
 import {isPortableDealArchived} from '../db/postgres/portable-deal-archive-store';
@@ -8,7 +9,7 @@ import {portableQuoteDisplayStatuses,portableQuoteQuery,portableQuoteStatusLabel
 import {quoteLabel} from '../lib/quotes';
 import {portableDb} from './portable-db';
 import {portableWorkspaceGuest} from './portable-identity';
-import {PortableQuoteExportButton} from './portable-quote-export-button';
+import {PortableCsvExportButton} from './portable-csv-export-button';
 import {PortableQuoteEditor} from './portable-quotes-ui';
 import {PortableCrmHeader} from './portable-crm-header';
 import './portable-contacts.css';
@@ -29,18 +30,19 @@ export default async function QuotesPage({searchParams}:{searchParams:Promise<Re
   if(status)next.set('status',status);
   if(expiresFrom)next.set('expiresFrom',expiresFrom);
   if(expiresThrough)next.set('expiresThrough',expiresThrough);
-  const selected=new URLSearchParams(next);
   const exportParams=new URLSearchParams(next);
   exportParams.set('export','csv');
-  if(id)selected.set('id',id);
-  if(version)selected.set('version',String(version));
-  if(query.data.after)selected.set('after',query.data.after);
+  const selected=new URLSearchParams();
+  for(const [key,value] of Object.entries(query.data)){
+    if(value!==undefined)selected.set(key,String(value));
+  }
   const user=await requireChatGPTUser(selected.size?'/quotes?'+selected:'/quotes');
   if(portableWorkspaceGuest(user.email))notFound();
-  const db=portableDb(),detail=id?await readPortableQuote(db,user.userId,id,query.data):undefined;
+  const includeBody=await portablePageHasBody();
+  const db=portableDb(),detail=id?await readPortableQuote(db,user,includeBody,id,query.data):undefined;
   if(id&&!detail)notFound();
   const dealArchived=detail?await isPortableDealArchived(db,user.userId,detail.quote.dealId):false;
-  const page=detail?undefined:await listPortableQuotes(db,user.userId,query.data);
+  const page=detail?undefined:await listPortableQuotes(db,user,includeBody,query.data);
   if(page?.next)next.set('after',page.next);
   return withPortableNavigation(user.email,<main className="portable-contacts">
     <PortableCrmHeader email={user.email} page="quotes"/>
@@ -58,7 +60,7 @@ export default async function QuotesPage({searchParams}:{searchParams:Promise<Re
         <label>Expiration date through <input type="date" name="expiresThrough" defaultValue={expiresThrough}/></label>
         <button>Search quotes</button>
       </form>
-      <PortableQuoteExportButton href={'/api/quotes?'+exportParams}/>
+      <PortableCsvExportButton filename="harbor-quotes.csv" href={'/api/quotes?'+exportParams}/>
       {page?.items.length?<div className="portable-contacts-table"><table><thead><tr><th>Quote</th><th>Status</th><th>Buyer</th><th>Deal</th><th>Expires (UTC)</th></tr></thead>
         <tbody>{page.items.map(item=><tr key={item.id}><td><a href={'/quotes?id='+item.id}>{item.title}</a></td>
           <td>{portableQuoteStatusLabels[item.status]}{item.number!==null?' · '+quoteLabel(item):''}</td><td>{item.buyer||'—'}</td><td>{item.dealName}</td><td>{item.expiresOn}</td></tr>)}</tbody></table></div>:<p>No matching quotes.</p>}

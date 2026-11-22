@@ -82,7 +82,8 @@ function TemplateDetail({id,contactId,refresh=0,children}:{
   return children(result.data.template,result.data.missing??[]);
 }
 
-export function PortableEmailTemplates(){
+export function PortableEmailTemplates({standalone=false}:{standalone?:boolean}){
+  const Heading=standalone?'h1':'h2';
   const [editor,setEditor]=useState<Editor|null>(null);
   const [refresh,setRefresh]=useState(0);
   const [dirty,setDirty]=useState(false);
@@ -149,9 +150,9 @@ export function PortableEmailTemplates(){
     </form>;
   }
 
-  return <section aria-label="Email templates">
+  return <section aria-label="Email templates" className={standalone?'portable-settings-content':undefined}>
     <div className="portable-email-section-heading">
-      <div><h2>Email templates</h2><p>Save reusable plain-text subjects and messages.</p></div>
+      <div><Heading>Email templates</Heading><p>Save reusable plain-text subjects and messages.</p></div>
       <button type="button" className="portable-email-primary" disabled={busy} onClick={()=>choose({id:crypto.randomUUID(),creating:true})}>New template</button>
     </div>
     <TemplateList selected={editor?.id} onSelect={id=>{if(editor?.id!==id)choose({id,creating:false});}}

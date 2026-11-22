@@ -1,8 +1,10 @@
+import {oidcDirectoryScope} from './portable-company-oidc-config';
+import {portableOidcDirectoryConfig,portableDirectoryConfig,portableSamlDirectoryConfig,samlDirectoryScope} from './portable-login-config';
 import {z} from 'zod';
 import {createPortableApiToken,readPortableApiTokens,revokePortableApiToken} from '../db/postgres/portable-api-token-store';
 import {lockPortableLoginSession} from '../db/postgres/identity-store';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
-import {portableTokenCreate,portableTokenPage,portableTokenRevoke} from '../lib/portable-api-tokens';
+import {entraDirectoryScope,portableTokenCreate,portableTokenPage,portableTokenRevoke} from '../lib/portable-api-tokens';
 import {portableApiIdentity} from './portable-api-identity';
 import {portableDb} from './portable-db';
 import {requestSessionHash} from './portable-identity';
@@ -35,7 +37,21 @@ async function tokens(request:Request){
       if('action' in change){
         return await revokePortableApiToken(tx,user.userId,change.id)?json({ok:true}):json({error:'Token not found.'},404);
       }
-      return json(await createPortableApiToken(tx,user.userId,change),201);
+      let directoryScope:string|undefined;
+      if('purpose' in change&&change.purpose==='saml_directory'){
+        const config=portableSamlDirectoryConfig();
+        if(!config)return json({error:'Enable company SSO and invited access first.'},409);
+        directoryScope=samlDirectoryScope(config.issuer);
+      }else if('purpose' in change&&change.purpose==='oidc_directory'){
+        const config=portableOidcDirectoryConfig();
+        if(!config)return json({error:'Enable OpenID Connect sign-in and invited access first.'},409);
+        directoryScope=oidcDirectoryScope(config.issuer);
+      }else if('purpose' in change){
+        const config=portableDirectoryConfig();
+        if(!config)return json({error:'Enable organizational Microsoft sign-in and invited access first.'},409);
+        directoryScope=entraDirectoryScope(config.tenant);
+      }
+      return json(await createPortableApiToken(tx,user.userId,change,directoryScope),201);
     });
   }catch(error){
     if(error instanceof z.ZodError)return json({error:error.issues[0]?.message??'Check the token settings.'},400);

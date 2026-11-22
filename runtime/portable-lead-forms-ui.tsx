@@ -32,16 +32,22 @@ const received=(at:number)=>new Date(at).toISOString().slice(0,16).replace('T','
 function CaptureSettings({selected}:{selected?:Form}){
   const saved=selected?.definition;
   const [capture,setCapture]=useState(!!saved&&saved.captureContacts!==false);
+  const [routeLead,setRouteLead]=useState(capture&&saved?.routeSalesLead===true);
   const [queueNote,setQueueNote]=useState(capture&&saved?.queueWorkflows===true&&!!saved.automationNote);
   return <div className="portable-form-settings">
     <div>
       <label><input name="captureContacts" type="checkbox" checked={capture} onChange={event=>{
         setCapture(event.target.checked);
-        if(!event.target.checked)setQueueNote(false);
+        if(!event.target.checked){setQueueNote(false);setRouteLead(false);}
       }}/>
         Automatically create or link contacts
       </label>
       <small>Leave unchecked to keep new submissions in the inquiry inbox until you choose to capture them.</small>
+    </div>
+    <div>
+      <label><input name="routeSalesLead" type="checkbox" checked={routeLead} disabled={!capture}
+        onChange={event=>setRouteLead(event.target.checked)}/>Route captured contacts to sales</label>
+      <small>Route a new lead when the contact has no open lead. The rep also owns a newly created contact. Existing contacts keep their owner. If no rep is available, the lead stays unassigned.</small>
     </div>
     <div>
       <label><input name="showMessageOnContact" type="checkbox" defaultChecked={saved?.showMessageOnContact===true}/>
@@ -62,9 +68,9 @@ function CaptureSettings({selected}:{selected?:Form}){
   </div>;
 }
 
-export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceInbox,selected,page,filter,inquirySearch}:{
+export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceInbox,selected,page,filter,inquirySearch,focusedInquiry}:{
   email:string;publicOrigin:string;forms:Form[];openOnly:boolean;workspaceInbox:boolean;selected?:Form;page?:Page;
-  filter:PortableInquiryFilter;inquirySearch?:string;
+  filter:PortableInquiryFilter;inquirySearch?:string;focusedInquiry?:boolean;
 }){
   const router=useRouter();
   const draftId=useRef<string|null>(null);
@@ -109,13 +115,13 @@ export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceIn
 
   function save(event:FormEvent<HTMLFormElement>){
     event.preventDefault();
-    const {captureContacts,showMessageOnContact,queueWorkflows,automationNote,...fields}=Object.fromEntries(new FormData(event.currentTarget));
+    const {locationFields,captureContacts,routeSalesLead,showMessageOnContact,queueWorkflows,automationNote,...fields}=Object.fromEntries(new FormData(event.currentTarget));
     const capture=captureContacts==='on';
     const queueNote=capture&&queueWorkflows==='on';
     const note=typeof automationNote==='string'?automationNote.trim():'';
     if(queueNote&&!note){setError('Enter text for the internal Note.');return;}
     const id=selected?.id??(draftId.current??=crypto.randomUUID());
-    void action({action:'save',id,revision:selected?.revision??0,definition:{...fields,captureContacts:capture,showMessageOnContact:showMessageOnContact==='on',
+    void action({action:'save',id,revision:selected?.revision??0,definition:{...fields,collectCountry:locationFields==='country'||locationFields==='region',collectRegion:locationFields==='region',captureContacts:capture,routeSalesLead:capture&&routeSalesLead==='on',showMessageOnContact:showMessageOnContact==='on',
       queueWorkflows:queueNote,...(queueNote?{automationNote:note}:{})}},
       'Form saved.',selected?undefined:id);
   }
@@ -151,6 +157,10 @@ export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceIn
           <label className="portable-form-text">Confirmation message<textarea name="thankYou" required maxLength={500} defaultValue={selected?.definition.thankYou??definition.thankYou}/></label>
           <label>Website origin for embedding (optional)<input name="embedOrigin" type="url" maxLength={254}
             placeholder="https://www.example.com" defaultValue={selected?.definition.embedOrigin??''}/></label>
+          <label>Location fields<select name="locationFields" defaultValue={selected?.definition.collectRegion?'region':selected?.definition.collectCountry?'country':'none'}>
+            <option value="none">None</option><option value="country">Country only</option>
+            <option value="region">Country and state or province</option>
+          </select></label>
           <CaptureSettings key={selected?.revision??0} selected={selected}/>
         </fieldset>
         <button type="submit" disabled={busy}>Save form</button>
@@ -169,10 +179,11 @@ export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceIn
         </details>}
         {selected.definition.captureContacts===false&&
           <LeadFormBackendSetup formId={selected.id} origin={publicOrigin} enabled={selected.enabled} apiAccessHref="/?view=api-access"/>}
-        <details><summary>Preview saved form</summary><PublicLeadForm key={selected.revision} form={selected} preview/></details>
+        <details><summary>Preview saved form</summary><PublicLeadForm key={selected.revision} form={selected} collectCountry={selected.definition.collectCountry} collectRegion={selected.definition.collectRegion} preview/></details>
       </>}
       {(selected||workspaceInbox)&&<>
-        <h2 id="form-inquiries">{workspaceInbox?'Workspace inquiries':'Inquiries'}</h2>
+        <h2 id="form-inquiries">{focusedInquiry?'Form inquiry':workspaceInbox?'Workspace inquiries':'Inquiries'}</h2>
+        {!focusedInquiry&&<>
         <p>Contact capture links an exact email match without changing it, or creates a contact for a new address. Multiple matches and archived matches may need review.</p>
         <nav className="portable-inquiry-filters" aria-label="Filter inquiries">
           <a href={inquiryLink('all')} aria-current={filter==='all'?'page':undefined}>All inquiries</a>
@@ -195,6 +206,7 @@ export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceIn
           {inquirySearch&&<a href={inquiryLink(filter,undefined,'')}>Clear search</a>}
         </form>
         <button type="button" disabled={busy} onClick={()=>router.refresh()}>Refresh inquiries</button>
+        </>}
         {status?.contactId&&<p role="status">{status.message}{' '}
           <a href={'/?contact='+status.contactId}>Open contact</a>
         </p>}
@@ -206,10 +218,11 @@ export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceIn
           filter==='needs_review'?'No inquiries need review on this page.':'No inquiries on this page.'}</p>}
         {page?.results.map(inquiry=><article key={inquiry.id}>
           {inquiry.payload?<><h3>{inquiry.payload.name}</h3>
-            <p>{inquiry.payload.email}{inquiry.payload.phone?' · '+inquiry.payload.phone:''} · {received(inquiry.receivedAt)}
+            <p>{inquiry.payload.email}{inquiry.payload.region?' · '+inquiry.payload.region:''}{inquiry.payload.country?' · '+inquiry.payload.country:''}{inquiry.payload.phone?' · '+inquiry.payload.phone:''} · {received(inquiry.receivedAt)}
               {workspaceInbox&&<> · <a href={link(inquiry.formId)}>{inquiry.formTitle}</a></>}</p>
             <p style={{whiteSpace:'pre-wrap'}}>{inquiry.payload.message}</p>
             <p>{inquiry.handled?'Handled':'Open'} · {inquiry.status==='created'?'Created contact':inquiry.status==='linked'?'Linked contact':inquiry.status==='inbox_only'?'Inbox only':'Needs review'}</p>
+            {inquiry.journeySite&&<p><a href={'/?'+new URLSearchParams({view:'web-attribution',siteId:inquiry.journeySite,inquiryId:inquiry.id})}>View conversion path</a></p>}
             {inquiry.status==='needs_review'&&<p>{inquiry.reviewReason&&reviewReasons[inquiry.reviewReason]||
               'Retry contact matching to check this inquiry again.'}</p>}
             {inquiry.contactId&&(inquiry.contactAvailable
@@ -235,8 +248,8 @@ export function PortableLeadForms({email,publicOrigin,forms,openOnly,workspaceIn
           }{inquiry.noteAutomation.attentionJobId&&<> · <a href={jobDetailsHref(inquiry.noteAutomation.attentionJobId)}>Open Note job</a></>}</p>}
         </article>)}
         <nav aria-label="Inquiry pages">
-          <a href={inquiryLink(filter)}>Latest inquiries</a>
-          {page?.next&&<a href={inquiryLink(filter,page.next)}>Older inquiries</a>}
+          <a href={inquiryLink(filter)+'#form-inquiries'}>{focusedInquiry?'All form inquiries':'Latest inquiries'}</a>
+          {page?.next&&<a href={inquiryLink(filter,page.next)+'#form-inquiries'}>Older inquiries</a>}
         </nav>
       </>}
     </section>

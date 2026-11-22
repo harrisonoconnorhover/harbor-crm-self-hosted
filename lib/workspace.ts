@@ -141,8 +141,8 @@ export type SavedView = {
 export const emptyView = (): ViewConfig => viewConfigSchema.parse({});
 export const propertyText = (value: unknown) =>
   Array.isArray(value) ? value.join("; ") : typeof value === "boolean" ? (value ? "Yes" : "No") : String(value ?? "");
-function parseCustomValue(
-  p: Property,
+export function parseCustomValue(
+  p: Pick<Property,'id'|'label'|'type'|'options'|'uniqueValues'>,
   value: unknown,
 ): string | number | boolean | string[] | undefined {
   if (value === undefined || value === null || value === "") return undefined;

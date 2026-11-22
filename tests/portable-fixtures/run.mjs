@@ -94,7 +94,7 @@ async function secureStorageProxy(port,certificate){
   return 'https://'+host+':'+server.address().port;
 }
 
-async function fixture(root,name,certificate,binaries){
+async function fixture(root,name,certificate,binaries,postgresOptions=[]){
   const port=await freePort(),password=randomBytes(24).toString('hex');
   const database=join(root,name),passwordFile=join(root,name+'-password');
   await writeFile(passwordFile,password+'\n',{mode:0o600});
@@ -105,7 +105,7 @@ async function fixture(root,name,certificate,binaries){
   }finally{await unlink(passwordFile);}
   const server=spawn(binaries.postgres,['-D',database,'-p',String(port),'-c','listen_addresses='+host,
     '-c','unix_socket_directories=','-c','ssl=on','-c','ssl_cert_file='+certificate.cert,
-    '-c','ssl_key_file='+certificate.key],{env,stdio:'ignore'});
+    '-c','ssl_key_file='+certificate.key,...postgresOptions],{env,stdio:'ignore'});
   const stopped=once(server,'close');
   void stopped.catch(()=>{});
   cleanup.push(async()=>{
@@ -132,25 +132,113 @@ async function fixture(root,name,certificate,binaries){
 }
 
 try{
+  const mode=process.argv.slice(2).join(' ');
+  const web='tests/portable-web.test.mjs',identity='tests/portable-microsoft-identity.test.mjs';
+  const saml='tests/portable-saml-identity.test.mjs';
+  const suitesByMode=new Map([
+    ['', [web,identity,saml]],
+    ['--saml', [saml]],
+    ['--keycloak', [saml]],
+    ['--directory', [identity]],
+    ['--team-upgrade', [identity]],
+    ['--teams', [web]],
+    ['--booking', [web]],
+    ['--recovery', [web]],
+    ['--custom-objects', [web]],
+    ['--team-inbox', [web]],
+    ['--webhooks', [web]],
+    ['--workflow-webhooks', [web]],
+    ['--ticket-workflows', [web]],
+    ['--company-workflows', [web]],
+    ['--custom-record-workflows', [web]],
+    ['--external-writes', [web]],
+    ['--deal-tasks', [web]],
+    ['--quote-signing', [web]],
+    ['--aircall', [web]],
+    ['--commerce-search', [web]],
+    ['--contact-archive', [web]],
+    ['--file-access', [web]],
+    ['--file-search', [web]],
+    ['--record-list-search', [web]],
+    ['--inquiry-search', [web]],
+    ['--stripe-invoices', [web]],
+    ['--lists', [web]],
+    ['--navigation', [web]],
+    ['--settings', [web]],
+    ['--conditional-paths', [web]],
+    ['--branch-steps', [web]],
+    ['--pool', [web]],
+    ['--sales-sequences', ['tests/portable-sales-sequence-store.test.mjs','tests/portable-sales-sequence-processor.test.mjs',web]],
+    ['--record-reporting', [web]],
+    ['--web-attribution', [web]],
+    ['--landing-pages', [web]],
+    ['--help-center', [web]],
+    ['--access-history', [web]],
+    ['--first-response', [web]],
+    ['--search', ['tests/portable-search-upgrade.test.mjs',web]],
+    ['--campaign-replicas', ['tests/portable-marketing-operator.test.mjs']],
+    ['--marketing', ['audience','designs','native-render','forms','suppression-import','suppression-export','campaign','operator','drain']
+      .map(name=>'tests/portable-marketing-'+name+'.test.mjs')],
+  ]);
+  const suites=suitesByMode.get(mode);
+  if(!suites)throw Error('Choose --recovery, --saml, --keycloak, --directory, --team-upgrade, --marketing, --campaign-replicas, --teams, --booking, --help-center, --landing-pages, --custom-objects, --team-inbox, --web-attribution, --first-response, --access-history, --webhooks, --workflow-webhooks, --ticket-workflows, --company-workflows, --custom-record-workflows, --external-writes, --quote-signing, --contact-archive, --file-access, --file-search, --record-list-search, --inquiry-search, --commerce-search, --stripe-invoices, --aircall, --lists, --settings, --navigation, --branch-steps, --conditional-paths, --deal-tasks, --sales-sequences, --record-reporting, --pool or --search for a focused rehearsal.');
+  if(mode==='--team-upgrade'&&!isAbsolute(process.env.HARBOR_TEST_UPGRADE_BUNDLE??''))throw Error('Set HARBOR_TEST_UPGRADE_BUNDLE to the absolute path of a local pre-team backup.');
   checkPrerequisites();
+  if(mode==='--pool'&&spawnSync(process.env.HARBOR_TEST_PGBOUNCER||'pgbouncer',['--version'],{stdio:'ignore',timeout:3000}).status!==0){
+    throw Error('Install PgBouncer or point HARBOR_TEST_PGBOUNCER at its executable for the pool rehearsal.');
+  }
   process.umask(0o077);
   const root=await mkdtemp(join(tmpdir(),'harbor-portable-test.'));
   cleanup.push(()=>rm(root,{recursive:true,force:true,maxRetries:3}));
   const certificate=await fixtureCertificate(root);
   const binaries=await import('@embedded-postgres/'+process.platform+'-'+process.arch);
-  const source=await fixture(root,'harbor_identity_test',certificate,binaries);
+  // The load rehearsals seed at least 200,000 records. Recycle their temporary WAL more frequently.
+  const source=await fixture(root,'harbor_identity_test',certificate,binaries,['--pool','--search'].includes(mode)?['-c','max_wal_size=128MB']:[]);
   if(!interrupted){
-    const target=await fixture(root,'harbor_restore_test',certificate,binaries);
+    const needsRestore=!mode||mode==='--quote-signing'||mode==='--recovery';
+    const target=needsRestore?await fixture(root,'harbor_restore_test',certificate,binaries):source;
     if(!interrupted){
-      child=spawn(process.execPath,['--test','tests/portable-web.test.mjs','tests/portable-microsoft-identity.test.mjs'],{cwd,stdio:'inherit',detached:true,env:{
+      child=spawn(process.execPath,['--test','--test-concurrency=2',...suites],{cwd,stdio:'inherit',detached:true,env:{
         ...env,TMPDIR:root,HARBOR_TEST_MONITOR_ROLE:'true',NODE_EXTRA_CA_CERTS:certificate.cert,PGSSLROOTCERT:certificate.cert,
         HARBOR_TEST_TLS_KEY:certificate.key,
+        ...(mode==='--team-upgrade'?{HARBOR_TEST_UPGRADE_BUNDLE:process.env.HARBOR_TEST_UPGRADE_BUNDLE}:{}),
         HARBOR_TEST_POSTGRES_URL:source.db,HARBOR_TEST_S3_ENDPOINT:source.s3,
         HARBOR_TEST_RESTORE_POSTGRES_URL:target.db,HARBOR_TEST_RESTORE_S3_ENDPOINT:target.s3,
         HARBOR_TEST_HOSTED_S3_ENDPOINT:source.secureS3,HARBOR_TEST_HOSTED_RESTORE_S3_ENDPOINT:target.secureS3,
         HARBOR_TEST_RESTORE_POSTGRES_SSLMODE:'verify-full',
+        ...(['--search','--lists','--team-upgrade','--contact-archive','--file-access','--commerce-search','--access-history','--saml','--keycloak','--directory','--teams','--booking','--help-center','--landing-pages','--first-response','--team-inbox','--sales-sequences','--marketing','--web-attribution','--external-writes','--quote-signing','--stripe-invoices','--aircall','--custom-objects','--settings','--navigation','--branch-steps','--conditional-paths','--deal-tasks','--webhooks','--workflow-webhooks','--ticket-workflows','--company-workflows','--custom-record-workflows','--record-reporting'].includes(mode)?{HARBOR_TEST_PLAYWRIGHT:process.env.HARBOR_TEST_PLAYWRIGHT,HARBOR_TEST_CHROME:process.env.HARBOR_TEST_CHROME}:{}),
+        ...(mode==='--pool'?{HARBOR_TEST_POOL:'true',HARBOR_TEST_PGBOUNCER:process.env.HARBOR_TEST_PGBOUNCER||'pgbouncer'}:{}),
+        HARBOR_TEST_CAMPAIGN_REPLICAS:String(mode==='--campaign-replicas'),
+        HARBOR_TEST_KEYCLOAK:String(mode==='--keycloak'),
+        HARBOR_TEST_SAML_UI:String(mode==='--saml'),
+        ...(mode==='--saml'&&process.env.HARBOR_TEST_OIDC_PROVIDER?{HARBOR_TEST_OIDC_PROVIDER:process.env.HARBOR_TEST_OIDC_PROVIDER}:{}),
+        HARBOR_TEST_DIRECTORY_UI:String(mode==='--directory'),
+        HARBOR_TEST_WEBHOOKS:String(mode==='--webhooks'),
+        HARBOR_TEST_CUSTOM_RECORD_WORKFLOWS:String(mode==='--custom-record-workflows'),
+        HARBOR_TEST_COMPANY_WORKFLOWS:String(mode==='--company-workflows'),
+        HARBOR_TEST_TICKET_WORKFLOWS:String(mode==='--ticket-workflows'),
+        HARBOR_TEST_WORKFLOW_WEBHOOKS:String(mode==='--workflow-webhooks'),
+        HARBOR_TEST_RECORD_REPORTING:String(mode==='--record-reporting'),
+        HARBOR_TEST_SALES_SEQUENCES:String(mode==='--sales-sequences'),
+        HARBOR_TEST_QUOTE_SIGNING:String(mode==='--quote-signing'),
+        HARBOR_TEST_CONTACT_ARCHIVE:String(mode==='--contact-archive'),
+        HARBOR_TEST_FILE_ACCESS:String(mode==='--file-access'),
+        HARBOR_TEST_FILE_SEARCH:String(mode==='--file-search'),
+        HARBOR_TEST_RECORD_LIST_SEARCH:String(mode==='--record-list-search'),
+        HARBOR_TEST_INQUIRY_SEARCH:String(mode==='--inquiry-search'),
+        HARBOR_TEST_COMMERCE_SEARCH:String(mode==='--commerce-search'),
+        HARBOR_TEST_AIRCALL:String(mode==='--aircall'),
+        HARBOR_TEST_STRIPE_INVOICES:String(mode==='--stripe-invoices'),
+        HARBOR_TEST_LISTS:String(mode==='--lists'),
+        HARBOR_TEST_SETTINGS:String(mode==='--settings'),
+        HARBOR_TEST_NAVIGATION:String(mode==='--navigation'),
+        HARBOR_TEST_BRANCH_STEPS:String(mode==='--branch-steps'),
+        HARBOR_TEST_CONDITIONAL_PATHS:String(mode==='--conditional-paths'),
+        HARBOR_TEST_DEAL_TASKS:String(mode==='--deal-tasks'),
+        HARBOR_TEST_EXTERNAL_WRITES:String(mode==='--external-writes'),HARBOR_TEST_ATTRIBUTION:String(mode==='--web-attribution'),HARBOR_TEST_TEAM_INBOX:String(mode==='--team-inbox'),
+        HARBOR_TEST_CUSTOM_OBJECTS:String(mode==='--custom-objects'),HARBOR_TEST_LANDING:String(mode==='--landing-pages'),HARBOR_TEST_ACCESS_HISTORY:String(mode==='--access-history'),HARBOR_TEST_FIRST_RESPONSE:String(mode==='--first-response'),HARBOR_TEST_HELP_CENTER:String(mode==='--help-center'),HARBOR_TEST_TEAM_BOOKING:String(mode==='--booking'),HARBOR_TEST_TEAMS_ONLY:String(mode==='--teams'),HARBOR_TEST_SEARCH_ONLY:String(mode==='--search'),
         HARBOR_TEST_SUITE_TIMEOUT_MS:process.env.HARBOR_TEST_SUITE_TIMEOUT_MS,
-        HARBOR_TEST_RECOVERY_ONLY:process.env.HARBOR_TEST_RECOVERY_ONLY,
+        HARBOR_TEST_RECOVERY_ONLY:mode==='--recovery'?'true':process.env.HARBOR_TEST_RECOVERY_ONLY,
         HARBOR_TEST_RAILWAY_ROLLBACK_COMMAND:process.env.HARBOR_TEST_RAILWAY_ROLLBACK_COMMAND,
       }});
       const [code]=await once(child,'exit');

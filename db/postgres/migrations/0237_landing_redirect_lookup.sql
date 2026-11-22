@@ -1,0 +1,1 @@
+CREATE INDEX "portable_landing_redirects" ON "portable_landing_pages" USING gin (("last_published"->'redirectFrom'));

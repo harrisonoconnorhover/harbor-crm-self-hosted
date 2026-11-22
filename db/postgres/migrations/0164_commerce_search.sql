@@ -1,0 +1,3 @@
+CREATE INDEX "portable_products_text_search" ON "portable_products" USING gin (((coalesce(lower("data"->>'name'),'') || chr(31) || coalesce(lower("data"->>'sku'),'')) COLLATE "C") public.gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "portable_quotes_text_search" ON "portable_quotes" USING gin (((coalesce(lower("data"->>'title'),'') || chr(31) || coalesce(lower("data"->'buyer'->>'name'),'') || chr(31) || coalesce(lower("deal_name"),'')) COLLATE "C") public.gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "portable_invoices_text_search" ON "portable_invoices" USING gin (((coalesce(lower("data"->>'title'),'') || chr(31) || coalesce(lower("data"->'buyer'->>'name'),'') || chr(31) || coalesce(lower("data"->>'reference'),'')) COLLATE "C") public.gin_trgm_ops);

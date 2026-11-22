@@ -296,7 +296,9 @@ section:has(> .portable-workspace-settings) > h1 {
 
 .portable-api-settings .portable-token-form fieldset {
   inline-size: 100%;
-  gap: 6px 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 10px 16px;
   align-items: start;
   padding: 8px 12px;
   border: 1px solid #dce6e4;
@@ -304,17 +306,6 @@ section:has(> .portable-workspace-settings) > h1 {
 }
 
 .portable-token-form legend { padding-inline: 4px; font-weight: 650; }
-.portable-contacts .portable-token-form label.portable-token-check {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-  min-block-size: 32px;
-}
-
-.portable-token-check input { accent-color: #075e63; }
-
 .portable-settings-content .portable-token-secret {
   display: flex;
   flex-wrap: wrap;
@@ -382,3 +373,11 @@ section:has(> .portable-workspace-settings) > h1 {
   border-radius: 6px;
   overflow-wrap: anywhere;
 }
+
+.portable-webhook-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 16px; }
+.portable-api-settings .portable-webhook-choice { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.portable-api-settings .portable-webhook-choice input { inline-size: 1rem; min-inline-size: 1rem; }
+.portable-webhook-receipt { padding-block: 10px; border-bottom: 1px solid #dce6e4; }
+.portable-webhook-receipt dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+.portable-webhook-receipt dd { margin: 0; overflow-wrap: anywhere; }
+.portable-webhook-review { margin-block: 8px; overflow-wrap: anywhere; }

@@ -1,0 +1,4 @@
+ALTER TABLE "portable_workflow_runs" DROP CONSTRAINT "portable_workflow_custom_creation_receipt";--> statement-breakpoint
+ALTER TABLE "portable_workflow_runs" ADD COLUMN "custom_record_revision" integer;--> statement-breakpoint
+CREATE UNIQUE INDEX "portable_workflow_custom_event_receipt" ON "portable_workflow_runs" USING btree ("workspace_id","workflow_id","custom_object_id","custom_record_id",coalesce("custom_record_revision",1)) WHERE "portable_workflow_runs"."custom_record_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_workflow_runs" ADD CONSTRAINT "portable_workflow_custom_revision" CHECK ("portable_workflow_runs"."custom_record_revision" IS NULL OR ("portable_workflow_runs"."custom_record_id" IS NOT NULL AND "portable_workflow_runs"."custom_record_revision">1));

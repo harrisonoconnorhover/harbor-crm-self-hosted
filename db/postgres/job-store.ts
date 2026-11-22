@@ -2,27 +2,32 @@ import {and,asc,count,desc,eq,exists,gt,isNull,lte,ne,notExists,or,sql,type SQL}
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {SharedRecordWriteScope} from '../../lib/portable-workspace-access';
 import {leadFormAutomationNote} from '../../lib/portable-lead-forms';
+import {ownedRecordScope} from './record-ownership-scope';
 import {lockRecordWorkspace} from './private-workspace-store';
 import {contactEvents,privateWorkspaces,contacts} from './contact-schema';
 import {activeContact} from './contact-visibility';
+import {loginIdentities} from './identity-schema';
 import {portableSegmentMatch} from './portable-segment-match';
 import {leadFormActivations,leadForms,leadFormNoteSources,leadInquiries} from './lead-form-schema';
 import {scheduledGmail} from './scheduled-gmail-schema';
 import {emailSuppressions} from './email-suppression-schema';
+import {workflowWebhookJobs} from './workflow-schema';
 import {portableTasks} from './task-schema';
+import {admitNextPathStep} from './workflow-path-step-store';
 import {queueNextManualNote,sequenceJobExists} from './manual-workflow-action-store';
 import {portableJobs as jobs,portableJobAttempts as attempts,portableNotes as notes,portableWorkerHeartbeat as heartbeat,type JobState} from './job-schema';
 
 type Db=PostgresJsDatabase;
 type Tx=Parameters<Parameters<Db['transaction']>[0]>[0];
 type Job=typeof jobs.$inferSelect;
-export type Claim=Job&{leaseToken:string};
+export type Claim=Job&{leaseToken:string;workflowWebhook?:typeof workflowWebhookJobs.$inferSelect};
 type Scope={workspaceId:string;contactId:string};
 type NoteInput={id:string;body:string;scheduledFor:number};
 type JobReview={action:'reviewGmail'|'reviewExternal';id:string}|{action:'reviewFailed'|'reviewSuppressedGmail';id:string;attempts:number};
 const attemptLimit=5;
 const active=sql`${jobs.status} IN ('running','dispatching')`;
 const queued=sql`${jobs.status}='queued'`;
+export const runnableQueuedJob=sql`${queued} AND ${jobs.waitForLifecycle} IS NULL`;
 export const gmailReauthorizationIssue='gmail_reauthorization_required';
 export const gmailSuppressedIssue='email_recipient_suppressed';
 const unreviewed=isNull(jobs.operatorReviewedAt);
@@ -42,7 +47,7 @@ export async function jobClock(db:Db){
 
 const jobOverdueMs=5*60_000;
 // Automatic backoff changes eligibility without restarting the overdue clock.
-export const jobOverdueAt=(at:SQL)=>sql<boolean>`${queued} AND
+export const jobOverdueAt=(at:SQL)=>sql<boolean>`${runnableQueuedJob} AND
   coalesce(${jobs.operatorRetryAt},${jobs.scheduledFor})<=${at}-${jobOverdueMs}`;
 export const heartbeatIntervalMs=15_000;
 const heartbeatStaleMs=60_000;
@@ -101,7 +106,7 @@ export async function portableQueueStatus(db:Db,expectWorker:boolean,capability:
     SELECT at::float8 AS checked_at,
       beat.last_poll_at::float8 AS last_heartbeat_at,
       ${pollColumns[capability]}::float8 AS last_successful_poll_at,
-      (SELECT available_at::float8 FROM ${jobs} WHERE ${queued} AND available_at<=at
+      (SELECT available_at::float8 FROM ${jobs} WHERE ${runnableQueuedJob} AND available_at<=at
         ORDER BY available_at LIMIT 1) AS oldest_due_at,
       EXISTS (SELECT 1 FROM ${jobs} WHERE ${jobOverdueAt(sql`at`)}) AS overdue,
       (SELECT lease_until::float8 FROM ${jobs} WHERE ${active} AND lease_until<=at
@@ -140,7 +145,7 @@ export async function portableTaskQueueStatus(db:Db){
     WITH clock AS (SELECT (${databaseTime})::bigint AS at)
     SELECT at::float8 AS at,
       (SELECT last_full_poll_at::float8 FROM ${heartbeat} WHERE id=1) AS last_full_poll_at,
-      EXISTS (SELECT 1 FROM ${jobs} WHERE ${queued} AND kind='task' AND available_at<=at) AS due
+      EXISTS (SELECT 1 FROM ${jobs} WHERE ${runnableQueuedJob} AND kind='task' AND available_at<=at) AS due
     FROM clock
   `);
   const dueWithoutWorker=status.due&&workerPollState(status.last_full_poll_at,status.at)!=='fresh';
@@ -152,7 +157,7 @@ export async function portableGmailQueueStatus(db:Db,expectGmailWorker=false){
     WITH clock AS (SELECT (${databaseTime})::bigint AS at)
     SELECT at::float8 AS at,
       (SELECT last_gmail_poll_at::float8 FROM ${heartbeat} WHERE id=1) AS last_gmail_poll_at,
-      EXISTS (SELECT 1 FROM ${jobs} WHERE ${queued} AND kind='gmail' AND available_at<=at) AS due,
+      EXISTS (SELECT 1 FROM ${jobs} WHERE ${runnableQueuedJob} AND kind='gmail' AND available_at<=at) AS due,
       EXISTS (SELECT 1 FROM ${jobs} WHERE status='failed' AND kind='gmail'
         AND issue=${gmailReauthorizationIssue} AND operator_reviewed_at IS NULL) AS reconnect_needs_review
     FROM clock
@@ -165,9 +170,9 @@ export async function portableGmailQueueStatus(db:Db,expectGmailWorker=false){
     ...(expectGmailWorker?{expectedWorkerMissing}:{})};
 }
 
-async function activeJobContact(tx:Tx,scope:Scope){
+async function activeJobContact(tx:Tx,scope:Scope,access?:SQL){
   const [contact]=await tx.select({id:contacts.id}).from(contacts)
-    .where(and(eq(contacts.workspaceId,scope.workspaceId),eq(contacts.id,scope.contactId),activeContact));
+    .where(and(eq(contacts.workspaceId,scope.workspaceId),eq(contacts.id,scope.contactId),activeContact,access));
   return !!contact;
 }
 
@@ -182,11 +187,15 @@ export async function enqueueNote(db:Db,scope:Scope,actorId:string,input:NoteInp
     const [workspace]=await tx.select({ownerId:privateWorkspaces.ownerId}).from(privateWorkspaces)
       .where(shared?eq(privateWorkspaces.id,scope.workspaceId):owner(scope.workspaceId,actorId)).for('no key update');
     if(!workspace)return 'missing';
-    if(shared&&await lockRecordWorkspace(tx,actorId,false,shared,'scheduledNotes')!==scope.workspaceId)return 'access';
+    if(shared){
+      if(await lockRecordWorkspace(tx,actorId,false,shared,'scheduledNotes',false,true)!==scope.workspaceId)return 'access';
+      const editable=ownedRecordScope(tx,actorId,scope.workspaceId,contacts,'edit','scheduledNotes',shared.grantId);
+      if(!await activeJobContact(tx,scope,editable))return 'missing';
+    }
     const [existing]=await tx.select().from(jobs).where(key({...scope,id:input.id}));
     if(existing)return existing.kind==='note'&&existing.actorId===actorId&&existing.contactId===scope.contactId&&existing.body===input.body&&
       existing.scheduledFor===input.scheduledFor?'ok':'conflict';
-    if(!await activeJobContact(tx,scope))return 'missing';
+    if(!shared&&!await activeJobContact(tx,scope))return 'missing';
     const at=await jobClock(tx);
     if(input.scheduledFor>at+90*24*60*60*1000)return 'date';
     if(!await availableJobSlots(tx,scope.workspaceId))return 'full';
@@ -223,7 +232,8 @@ export function retryInternalJob(db:Db,scope:Scope,actorId:string,id:string,kind
   });
 }
 
-export function canCancelJob(job:Pick<Job,'kind'|'status'>){
+export function canCancelJob(job:Pick<Job,'kind'|'status'|'attempts'|'waitForLifecycle'>){
+  if(job.kind==='external')return job.status==='queued'&&job.attempts===0&&job.waitForLifecycle!==null;
   return (job.kind==='note'||job.kind==='gmail'||job.kind==='task')&&(job.status==='queued'||job.status==='running');
 }
 
@@ -271,7 +281,7 @@ export function reviewPortableJob(db:Db,contactId:string,actorId:string,review:J
   });
 }
 
-export function cancelPortableJob(db:Db,scope:Scope,actorId:string,id:string,kind:'note'|'gmail'|'task'){
+export function cancelPortableJob(db:Db,scope:Scope,actorId:string,id:string,kind:'note'|'gmail'|'task'|'external'){
   return db.transaction(async tx=>{
     const where=key({...scope,id});
     const [match]=await tx.select({job:jobs}).from(jobs)
@@ -280,7 +290,7 @@ export function cancelPortableJob(db:Db,scope:Scope,actorId:string,id:string,kin
         sql`coalesce(${jobs.authorizedOwnerId},${jobs.actorId})=${actorId}`)).for('update',{of:jobs});
     if(!match)return 'missing';
     const {job}=match;
-    const issue=kind==='note'?'note_cancelled':kind==='task'?'task_cancelled':'email_cancelled';
+    const issue=kind==='external'?'event_wait_cancelled':kind==='note'?'note_cancelled':kind==='task'?'task_cancelled':'email_cancelled';
     if(job.status==='skipped'&&job.issue===issue)return 'ok';
     if(!canCancelJob(job))return 'conflict';
     const at=await jobClock(tx);
@@ -306,11 +316,12 @@ export const queuedGmailRecipientBlocked=sql<boolean>`CASE WHEN ${jobs.kind}='gm
 
 export async function contactJobHistory(db:Db,scope:Scope,after?:{at:number;id:string},notesOnly=false){
   const nextPage=after?sql`(${jobs.createdAt},${jobs.id}) < (${after.at},${after.id}::uuid)`:undefined;
-  const rows=await db.select({id:jobs.id,body:jobs.body,kind:jobs.kind,status:jobs.status,attempts:jobs.attempts,issue:jobs.issue,
-    scheduledFor:jobs.scheduledFor,availableAt:jobs.availableAt,createdAt:jobs.createdAt,finishedAt:jobs.finishedAt,operatorReviewedAt:jobs.operatorReviewedAt,
+  const rows=await db.select({id:jobs.id,body:jobs.body,actorEmail:loginIdentities.email,kind:jobs.kind,status:jobs.status,attempts:jobs.attempts,issue:jobs.issue,
+    waitForLifecycle:jobs.waitForLifecycle,scheduledFor:jobs.scheduledFor,availableAt:jobs.availableAt,createdAt:jobs.createdAt,finishedAt:jobs.finishedAt,operatorReviewedAt:jobs.operatorReviewedAt,
     completedAt:notes.createdAt,receipts:jobAttemptReceipts,recipientBlocked:queuedGmailRecipientBlocked,gmail:{sender:scheduledGmail.sender,recipient:scheduledGmail.recipient,
       subject:scheduledGmail.subject,providerId:scheduledGmail.providerId}})
-    .from(jobs).leftJoin(notes,and(eq(notes.workspaceId,jobs.workspaceId),eq(notes.jobId,jobs.id)))
+    .from(jobs).innerJoin(loginIdentities,eq(loginIdentities.id,jobs.actorId))
+    .leftJoin(notes,and(eq(notes.workspaceId,jobs.workspaceId),eq(notes.jobId,jobs.id)))
     .leftJoin(scheduledGmail,and(eq(scheduledGmail.workspaceId,jobs.workspaceId),eq(scheduledGmail.jobId,jobs.id)))
     .where(and(eq(jobs.workspaceId,scope.workspaceId),eq(jobs.contactId,scope.contactId),notesOnly?eq(jobs.kind,'note'):undefined,nextPage))
     .orderBy(desc(jobs.createdAt),desc(jobs.id)).limit(26);
@@ -318,11 +329,16 @@ export async function contactJobHistory(db:Db,scope:Scope,after?:{at:number;id:s
   return {items,next:rows.length>25&&last?{at:last.createdAt,id:last.id}:null};
 }
 
-export async function claimPortableJob(db:Db,{leaseMs,code=false,gmail=false,notesOnly=false}:{leaseMs?:number;code?:boolean;gmail?:boolean;notesOnly?:boolean}={}):Promise<Claim|null>{
+export async function claimPortableJob(db:Db,{leaseMs,code=false,gmail=false,webhooks=false,notesOnly=false}:{leaseMs?:number;code?:boolean;gmail?:boolean;webhooks?:boolean;notesOnly?:boolean}={}):Promise<Claim|null>{
   return db.transaction(async tx=>{
     const at=await jobClock(tx);
     // An incapable worker must leave these jobs available for a configured worker.
-    const due=and(queued,lte(jobs.availableAt,at),notesOnly?eq(jobs.kind,'note'):undefined,
+    const sequenceDisabled=gmail&&process.env.HARBOR_SEQUENCE_WORKER_ENABLED!=='true';
+    const workflowWebhook=tx.select({id:workflowWebhookJobs.jobId}).from(workflowWebhookJobs)
+      .where(and(eq(workflowWebhookJobs.workspaceId,jobs.workspaceId),eq(workflowWebhookJobs.jobId,jobs.id)));
+    const due=and(runnableQueuedJob,lte(jobs.availableAt,at),sequenceDisabled?sql`(${jobs.kind}<>'gmail' OR NOT EXISTS (
+      SELECT 1 FROM portable_sales_sequence_steps st WHERE st.workspace_id=${jobs.workspaceId} AND st.job_id=${jobs.id}))`:undefined,notesOnly?eq(jobs.kind,'note'):undefined,
+      webhooks||notesOnly?undefined:or(ne(jobs.kind,'external'),notExists(workflowWebhook)),
       code?undefined:ne(jobs.kind,'code'),gmail?undefined:ne(jobs.kind,'gmail'));
     const eligible=tx.select({id:jobs.id}).from(jobs).where(and(eq(jobs.workspaceId,privateWorkspaces.id),due));
     const busy=tx.select({id:jobs.id}).from(jobs).where(and(eq(jobs.workspaceId,privateWorkspaces.id),active));
@@ -344,6 +360,11 @@ export async function claimPortableJob(db:Db,{leaseMs,code=false,gmail=false,not
       .where(key(candidate)).returning();
     await tx.update(privateWorkspaces).set({lastJobClaimAt:at}).where(eq(privateWorkspaces.id,workspace.id));
     await tx.insert(attempts).values({workspaceId:workspace.id,jobId:job.id,number,startedAt:at});
+    if(webhooks&&job.kind==='external'){
+      const [workflowWebhook]=await tx.select().from(workflowWebhookJobs)
+        .where(and(eq(workflowWebhookJobs.workspaceId,job.workspaceId),eq(workflowWebhookJobs.jobId,job.id)));
+      if(workflowWebhook)return {...job,leaseToken,workflowWebhook};
+    }
     return {...job,leaseToken};
   });
 }
@@ -359,6 +380,7 @@ export async function closeAttempt(tx:Tx,job:Job,at:number,status:JobState,issue
   await tx.update(jobs).set({status,issue,availableAt,finishedAt:status==='queued'?null:at,leaseUntil:null,leaseToken:null}).where(key(job));
   await tx.update(attempts).set({endedAt:at,outcome:issue??status})
     .where(and(eq(attempts.workspaceId,job.workspaceId),eq(attempts.jobId,job.id),eq(attempts.number,job.attempts)));
+  if(status==='succeeded'&&(job.kind==='note'||job.kind==='task'||job.kind==='external'))await admitNextPathStep(tx,job,at);
 }
 
 async function deferAttempt(tx:Tx,job:Job,at:number,issue:string){

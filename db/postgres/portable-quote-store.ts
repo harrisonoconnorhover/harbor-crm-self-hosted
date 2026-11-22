@@ -1,3 +1,5 @@
+import {readCommerceResult,type RecordAccessActor} from './record-access-store';
+import {matchesCommerceSearch,quoteSearchFields} from './commerce-search';
 import {and,asc,desc,eq,gt,gte,lt,lte,max,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {portableQuoteExportLimit,portableQuoteStatus,type PortableQuoteDetail,type PortableQuoteDisplayStatus,type PortableQuoteFilters,type PortableQuoteMutation,type PortableQuotePage,type PortableQuoteQuery} from '../../lib/portable-quotes';
@@ -12,6 +14,8 @@ import {deals} from './deal-schema';
 import {loginIdentities} from './identity-schema';
 import {portableLineItemSets} from './portable-line-item-schema';
 import {portableQuoteEvents as events,portableQuotes as quotes,portableQuoteVersions as versions} from './portable-quote-schema';
+import {quoteSigningLinks,quoteSignatureReceipts} from './portable-quote-schema';
+import {receiptFields} from './quote-signing-store';
 import {lockRecordWorkspace} from './private-workspace-store';
 import {privateWorkspaces} from './workspace-schema';
 
@@ -35,34 +39,36 @@ function matchingQuotes(db:PostgresJsDatabase,actorId:string,input:PortableQuote
     when ${expiresOn}<${today} then 'expired'
     else 'published'
   end`;
-  return db.select({id:quotes.id,dealName:quotes.dealName,title,buyer,expiresOn,
+  return db.select({id:quotes.id,dealId:quotes.dealId,dealName:quotes.dealName,title,buyer,expiresOn,
     number:quotes.number,version:quotes.version,status:status.as('display_status')})
     .from(quotes).innerJoin(privateWorkspaces,tenant).where(and(eq(privateWorkspaces.ownerId,actorId),
       input.dealId?eq(quotes.dealId,input.dealId):undefined,input.after?gt(quotes.id,input.after):undefined,
       input.status&&input.status!=='all'?sql`${status}=${input.status}`:undefined,
       input.expiresFrom?gte(datedExpiresOn,input.expiresFrom):undefined,
       input.expiresThrough?lte(datedExpiresOn,input.expiresThrough):undefined,
-      input.q?sql`(strpos(lower(${title}),lower(${input.q}))>0 OR strpos(lower(${buyer}),lower(${input.q}))>0 OR strpos(lower(${quotes.dealName}),lower(${input.q}))>0)`:undefined))
+      matchesCommerceSearch(quoteSearchFields(quotes.data,quotes.dealName),input.q)))
     .orderBy(asc(quotes.id)).limit(limit);
 }
 
-export async function listPortableQuotes(db:PostgresJsDatabase,actorId:string,input:PortableQuoteQuery):Promise<PortableQuotePage>{
-  const rows=await matchingQuotes(db,actorId,input,size+1);
-  const items=rows.slice(0,size).map(({version,...row})=>({...row,version:version??0}));
-  return {items,next:rows.length>size?items.at(-1)!.id:null};
+export async function listPortableQuotes(db:PostgresJsDatabase,actor:RecordAccessActor,includeBody:boolean,input:PortableQuoteQuery):Promise<PortableQuotePage>{
+  return readCommerceResult(db,actor,'quotes',includeBody&&'list',async tx=>{
+    const rows=await matchingQuotes(tx,actor.userId,input,size+1);
+    const items=rows.slice(0,size).map(({id,dealName,title,buyer,expiresOn,number,status,version})=>({id,dealName,title,buyer,expiresOn,number,status,version:version??0}));
+    return {items,next:rows.length>size?items.at(-1)!.id:null};
+  },result=>result.items.map(item=>item.id));
 }
 
 export async function listPortableQuotesForExport(db:PostgresJsDatabase,actorId:string,filters:PortableQuoteFilters){
   const rows=await matchingQuotes(db,actorId,filters,portableQuoteExportLimit+1);
   if(rows.length>portableQuoteExportLimit)return null;
-  return rows.map(({id,dealName,title,expiresOn,number,version,status})=>({id,dealName,title,expiresOn,number,version,status}));
+  return rows.map(({id,dealId,dealName,title,expiresOn,number,version,status})=>({id,dealId,dealName,title,expiresOn,number,version,status}));
 }
 
-export function readPortableQuote(db:PostgresJsDatabase,actorId:string,id:string,options:QuoteReadOptions={}):Promise<PortableQuoteDetail|null>{
+export function readPortableQuote(db:PostgresJsDatabase,actor:RecordAccessActor,includeBody:boolean,id:string,options:QuoteReadOptions={}):Promise<PortableQuoteDetail|null>{
   const {before,version,versionBefore,download}=options;
-  return db.transaction(async tx=>{
+  return readCommerceResult(db,actor,'quotes',includeBody&&'detail',async tx=>{
     const [row]=await tx.select({...publicColumns,workspaceId:quotes.workspaceId}).from(quotes).innerJoin(privateWorkspaces,tenant)
-      .where(and(eq(privateWorkspaces.ownerId,actorId),eq(quotes.id,id)));
+      .where(and(eq(privateWorkspaces.ownerId,actor.userId),eq(quotes.id,id)));
     if(!row)return null;
     const {workspaceId,disposition,...draft}=row;
     const quote:Quote={...draft,status:portableQuoteStatus(draft.publishedAt,disposition),version:draft.version??0};
@@ -77,9 +83,13 @@ export function readPortableQuote(db:PostgresJsDatabase,actorId:string,id:string
     const history=await tx.select({revision:events.revision,action:events.action,at:events.at,note:events.note,actorName:loginIdentities.fullName})
       .from(events).innerJoin(loginIdentities,eq(events.actorId,loginIdentities.id)).where(and(eq(events.workspaceId,workspaceId),
         eq(events.quoteId,id),before?lt(events.revision,before):undefined)).orderBy(desc(events.revision)).limit(size+1);
-    return {quote,history:history.slice(0,size),next:history.length>size?history[size-1].revision:null,
+    const [link]=selected?await tx.select({id:quoteSigningLinks.id}).from(quoteSigningLinks).where(and(
+      eq(quoteSigningLinks.workspaceId,workspaceId),eq(quoteSigningLinks.quoteId,id),eq(quoteSigningLinks.version,selected))):[];
+    const [signature]=selected?await tx.select(receiptFields).from(quoteSignatureReceipts).where(and(
+      eq(quoteSignatureReceipts.workspaceId,workspaceId),eq(quoteSignatureReceipts.quoteId,id),eq(quoteSignatureReceipts.version,selected))):[];
+    return {quote,signingLinkId:link?.id??null,signature:signature??null,history:history.slice(0,size),next:history.length>size?history[size-1].revision:null,
       versions:saved.slice(0,size),nextVersion:saved.length>size?saved[size-1].version:null,published:published??null};
-  },{isolationLevel:'repeatable read',accessMode:'read only'});
+  },result=>result?[result.quote.id]:[]);
 }
 
 export function savePortableQuote(db:PostgresJsDatabase,actor:{userId:string;displayName:string;email:string},input:PortableQuoteMutation){

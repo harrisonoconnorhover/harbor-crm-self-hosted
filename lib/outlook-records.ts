@@ -9,7 +9,7 @@ export const outlookLog=outlookLookup.extend({
   selection:z.string().regex(/^[A-Za-z0-9_-]{43}$/),attended:z.literal(true).optional(),
 }).strict().refine(input=>input.provider==='outlook-calendar'?input.attended===true:input.attended===undefined);
 export type OutlookLookup=z.infer<typeof outlookLookup>;
-export type OutlookRecordPreview={selection:string;subject:string;occurredAt:number;excerpt?:string;logged:boolean};
+export type OutlookRecordPreview={selection:string;subject:string;occurredAt:number;excerpt?:string;logged:boolean;canConfirmReply?:boolean};
 export type OutlookItem={id:string;subject:string;occurredAt:number;participants:string[];excerpt?:string};
 export type OutlookRecordResults={items:OutlookRecordPreview[];limited:boolean};
 export function outlookDateWindow({through,days}:Pick<OutlookLookup,'through'|'days'>,now:number){

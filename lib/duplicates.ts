@@ -5,9 +5,10 @@ export type DuplicatePair = { left: CRMRecord; right: CRMRecord; score: number; 
 export type DuplicateCursor = [number, string, string];
 export const duplicateKey = (a: string, b: string) => JSON.stringify(a < b ? [a, b] : [b, a]);
 const text = (value: string | undefined) => (value || "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
+export const duplicateCompanySuffixes=["inc","incorporated","llc","ltd","limited","corp","corporation","company","co"];
 export function duplicateName(record: CRMRecord) {
   const words = text(record.data.name).split(" ");
-  if (record.kind === "companies") while (words.length > 1 && /^(inc|incorporated|llc|ltd|limited|corp|corporation|company|co)$/.test(words.at(-1)!)) words.pop();
+  if (record.kind === "companies") while (words.length > 1 && duplicateCompanySuffixes.includes(words.at(-1)!)) words.pop();
   return words.join(" ");
 }
 export function duplicateDomain(value: string | undefined) {
@@ -63,6 +64,10 @@ export function compareDuplicateCursor(a: DuplicateCursor, b: DuplicateCursor) {
 // edits/transpositions without comparing every record with every other record.
 export function findDuplicates(records: CRMRecord[], kind: DuplicateKind, pairLimit = 10_000, options: { excluded?: Set<string>; query?: string; strength?: "all" | "strong" | "possible" } = {}) {
   const all = new Map(records.map(r => [r.id, r])), rows = records.filter(r => r.kind === kind).sort((a,b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const query=options.query?.trim().toLowerCase();
+  const hits=query?new Set(rows.filter(record=>[record.data.name,record.data.email,record.data.domain]
+    .some(value=>value?.toLowerCase().includes(query))).map(record=>record.id)):undefined;
+  if(hits&&!hits.size)return {pairs:[] as DuplicatePair[],limited:false,recordsChecked:rows.length};
   const blocks = [new Map<string, CRMRecord[]>(), new Map<string, CRMRecord[]>(), new Map<string, CRMRecord[]>()];
   function add(tier: number, key: string, record: CRMRecord) { if (!key) return; const group = blocks[tier].get(key); if (group) group.push(record); else blocks[tier].set(key, [record]); }
   for (const record of rows) {
@@ -77,15 +82,27 @@ export function findDuplicates(records: CRMRecord[], kind: DuplicateKind, pairLi
   }
   const seen = new Set<string>(), pairs: DuplicatePair[] = [];
   let limited = false;
-  scan: for (const tier of blocks) for (const group of tier.values()) for (let i=0; i<group.length; i++) for (let j=i+1; j<group.length; j++) {
-    const key = duplicateKey(group[i].id, group[j].id);
-    if (seen.has(key) || options.excluded?.has(key)) continue;
-    const query = options.query?.trim().toLowerCase();
-    if (query && ![group[i], group[j]].some(r => [r.data.name, r.data.email, r.data.domain].some(v => v?.toLowerCase().includes(query)))) continue;
-    if (pairs.length >= pairLimit || seen.size >= 100_000) { limited = true; break scan; }
-    seen.add(key);
-    const pair = duplicateEvidence(group[i], group[j], all);
-    if (pair && (options.strength !== "strong" || pair.score >= 90) && (options.strength !== "possible" || pair.score < 90)) pairs.push(pair);
+  scan: for (const tier of blocks) for (const group of tier.values()) {
+    if(group.length<2)continue;
+    const matching=hits?group.flatMap((row,index)=>hits.has(row.id)?[index]:[]):undefined;
+    if(matching?.length===0)continue;
+    let nextMatch=0;
+    for(let i=0;i<group.length-1;i++){
+      // Keep the original (left ID, right ID) traversal, including when the scan hits a limit.
+      // A matching left record pairs with every later record. Other left records only visit later hits.
+      const leftMatches=matching?.[nextMatch]===i;
+      if(leftMatches)nextMatch++;
+      const partners=leftMatches?undefined:matching;
+      for(let n=partners?nextMatch:i+1;n<(partners?.length??group.length);n++){
+        const left=group[i],right=group[partners?partners[n]:n];
+        const key=duplicateKey(left.id,right.id);
+        if(seen.has(key)||options.excluded?.has(key))continue;
+        if(pairs.length>=pairLimit||seen.size>=100_000){limited=true;break scan;}
+        seen.add(key);
+        const pair=duplicateEvidence(left,right,all);
+        if(pair&&(options.strength!=="strong"||pair.score>=90)&&(options.strength!=="possible"||pair.score<90))pairs.push(pair);
+      }
+    }
   }
   pairs.sort((a,b) => compareDuplicateCursor(pairCursor(a), pairCursor(b)));
   return { pairs, limited, recordsChecked: rows.length };

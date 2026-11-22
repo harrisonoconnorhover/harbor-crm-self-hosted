@@ -1,0 +1,27 @@
+.landing-columns{display:grid;grid-template-columns:minmax(18rem,4fr) minmax(20rem,5fr);gap:1.5rem;align-items:start}
+.landing-editor .landing-columns>fieldset{display:grid;align-content:start;gap:.8rem;min-width:0}
+.landing-columns aside{position:sticky;top:1rem;min-width:0}.landing-columns iframe{display:block;width:100%;height:32rem;border:1px solid #d3dfdc;border-radius:.6rem;background:white}
+.landing-block{padding:.85rem;border:1px solid #cfdbd8;border-radius:.5rem}.landing-block-actions,.landing-tools{display:flex;align-items:center;flex-wrap:wrap;gap:.45rem}.landing-block-actions strong{cursor:grab;margin-inline-end:auto}
+.landing-editor>.landing-tools{margin-block-start:1rem}
+@media(max-width:780px){.landing-columns{grid-template-columns:1fr}.landing-columns aside{position:static}.landing-columns iframe{height:22rem}}
+
+.landing-block-list,.landing-palette{display:grid;gap:.8rem}
+.landing-block,.landing-drop-end{position:relative}
+.landing-block-list [data-insert-before=true]::before{content:'';position:absolute;inset:-.48rem 0 auto;border-top:3px solid #17696b;pointer-events:none}
+.landing-drop-end{padding:1rem;border:1px dashed #718c89;border-radius:.5rem;text-align:center}
+.landing-palette button[draggable=true]{cursor:grab}
+
+.landing-search-settings summary{cursor:pointer;font-weight:600}
+.landing-search-settings label{margin-block-start:.7rem}
+.landing-search-settings input[type=checkbox]{width:auto}
+
+.landing-manager form,.landing-manager nav{display:flex;flex-wrap:wrap;align-items:end;gap:.75rem;margin:1rem 0}
+.landing-manager label,.landing-manager td small{display:block}
+.landing-manager input,.landing-manager select{display:block;max-width:100%}
+.landing-manager table{white-space:normal}
+.landing-manager td{overflow-wrap:anywhere}
+@media(max-width:36rem){
+  .portable-contacts .landing-manager table{table-layout:fixed}
+  .portable-contacts .landing-manager :is(th,td){padding-inline:6px;white-space:normal;overflow-wrap:anywhere}
+  .landing-editor .landing-block select{width:100%;min-width:0}
+}

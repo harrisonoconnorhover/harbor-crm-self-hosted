@@ -1,4 +1,5 @@
-import {foreignKey,integer,pgTable,primaryKey,text,timestamp,unique,uuid} from 'drizzle-orm/pg-core';
+import {isNotNull,sql} from 'drizzle-orm';
+import {foreignKey,index,integer,pgTable,primaryKey,text,timestamp,unique,uuid} from 'drizzle-orm/pg-core';
 import {contacts} from './contact-schema';
 import {loginIdentities} from './identity-schema';
 
@@ -18,6 +19,7 @@ export const contactFileVersions=pgTable('contact_file_versions',{
   createdAt:timestamp('created_at',{withTimezone:true,mode:'string'}).notNull(),
 },table=>[
   primaryKey({columns:[table.workspaceId,table.contactId,table.fileId,table.versionId]}),
+  index('contact_file_name_search').using('gin',sql`${table.name} public.gin_trgm_ops`).where(isNotNull(table.revision)),
   unique('contact_file_revision').on(table.workspaceId,table.contactId,table.fileId,table.revision),
   foreignKey({columns:[table.workspaceId,table.contactId],foreignColumns:[contacts.workspaceId,contacts.id]}),
 ]);

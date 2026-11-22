@@ -41,7 +41,7 @@ export function admitManualNoteBatch(db:Db,actorId:string,input:PortableManualWo
     }
 
     const {definition,revision}=await activeManualWorkflow(tx,workspaceId,input);
-    if(definition.actionKind==='task'||definition.actionKind==='code'||definition.actionKind==='note_sequence'||definition.actionKind==='note_branch'||definition.delayMinutes!==0)
+    if((definition.actionKind!==undefined&&definition.actionKind!=='note')||definition.delayMinutes!==0)
       throw new ApiError(409,'Choose an immediate manual Contact Note workflow for a batch.');
     const ids=await Promise.all(input.contactIds.map(contactId=>stableNoteRunId(workspaceId,input.id,contactId)));
     const targets=await manualRunTargets(tx,workspaceId,input.workflowId,input.contactIds,ids);

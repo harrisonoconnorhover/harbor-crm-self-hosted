@@ -1,10 +1,12 @@
+import {hiddenStandardFields} from './standard-property-access';
+import {hiddenPropertyIds} from './record-property-access';
 import {and,asc,count,eq,ne,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {portableStageCustomId,portableStageProbability,type DealPipeline,type PipelineStage,type PipelineWrite} from '../../lib/portable-deal-pipelines';
 import {dealPipelines as pipelines,dealPipelineStages as stages} from './deal-pipeline-schema';
 import {privateWorkspaces} from './workspace-schema';
 import {listDealStageCustomFields} from './custom-property-store';
-import {recordWorkspaceScope} from './workspace-viewer-store';
+import {recordCatalogScope} from './workspace-viewer-store';
 
 const stageFields={id:stages.id,name:stages.name,outcome:stages.outcome,probability:stages.probability,requiredProperties:stages.requiredProperties};
 type StoredStage=Pick<typeof stages.$inferSelect,keyof typeof stageFields>;
@@ -14,10 +16,15 @@ function displayStage({requiredProperties,probability,...stage}:StoredStage):Pip
 const pipelineFields={id:pipelines.id,name:pipelines.name,revision:pipelines.revision};
 
 export async function readDealPipelines(db:PostgresJsDatabase,actorId:string,workspaceId?:string){
-  const rows=await db.select({pipeline:pipelineFields,stage:stageFields}).from(pipelines)
+  const rows=await db.select({pipeline:pipelineFields,stage:{...stageFields,requiredProperties:workspaceId?
+    sql<StoredStage['requiredProperties']>`(SELECT coalesce(jsonb_agg(item ORDER BY position),'[]'::jsonb)
+      FROM jsonb_array_elements(${stages.requiredProperties}) WITH ORDINALITY AS rule(item,position)
+      WHERE (item->>'field') NOT IN (${hiddenStandardFields(workspaceId,'deals',actorId)})
+        AND (substring(item->>'field' from '^custom:(.*)$') IS NULL
+        OR lower(substring(item->>'field' from '^custom:(.*)$')) NOT IN (${hiddenPropertyIds(workspaceId,'deals',actorId)})))`:stages.requiredProperties}}).from(pipelines)
     .innerJoin(privateWorkspaces,eq(privateWorkspaces.id,pipelines.workspaceId))
     .innerJoin(stages,and(eq(stages.workspaceId,pipelines.workspaceId),eq(stages.pipelineId,pipelines.id)))
-    .where(recordWorkspaceScope(db,actorId,workspaceId))
+    .where(recordCatalogScope(db,actorId,workspaceId))
     .orderBy(asc(pipelines.name),asc(pipelines.id),asc(stages.position)).limit(200);
   const results=new Map<string,DealPipeline>();
   for(const {pipeline,stage} of rows){

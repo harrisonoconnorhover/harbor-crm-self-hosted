@@ -21,7 +21,7 @@ async function categories(request:Request){
       return json({item:await mutatePortableKnowledgeCategory(db,user.userId,portableKnowledgeCategoryMutation.parse(JSON.parse(text)))});
     }
     const query=portableKnowledgeCategoryQuery.parse(Object.fromEntries(params));
-    return json({items:await listPortableKnowledgeCategories(db,user.userId,query.status)});
+    return json(await listPortableKnowledgeCategories(db,user.userId,query));
   }catch(error){
     if(error instanceof ApiError)return json({error:error.message},error.status);
     if(error instanceof z.ZodError)return json({error:error.issues[0]?.message??'Check the category fields.'},400);

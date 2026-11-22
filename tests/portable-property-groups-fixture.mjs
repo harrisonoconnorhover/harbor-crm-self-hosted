@@ -71,6 +71,12 @@ export async function verifyPortablePropertyGroups({request,origin,headers,other
     assert.deepEqual(propertyList.properties.find(property=>property.id===contactProperty.id),contactProperty);
     const current=await (await request('/api/crm?kind=contacts&id='+contactId,{headers})).json();
     assert.deepEqual(current,record,'Group edits must preserve values and record revision.');
+    const detail=await (await request('/?contact='+contactId,{headers})).text();
+    const dialog=detail.match(/<dialog[^>]*class="portable-properties-dialog"[\s\S]*?<\/dialog>/)?.[0];
+    assert.ok(dialog,'The record provides a dedicated read-only property browser.');
+    const sections=dialog.split('</section>');
+    assert.ok(sections.some(section=>section.includes('<h3>'+renamed.groups[0].name+'</h3>')&&
+      section.includes('<dt>Phone</dt>')&&section.includes('Fictional unchanged value')));
     const restoredDefault=await write(3,{...move,group:'default:custom',fields:[custom]});
     assert.deepEqual(await restoredDefault.json(),{...renamed,revision:4,assignments:{phone:group.id,postalCode:group.id}});
     assert.equal((await write(4,{...move,group:'default:contact_information',fields:['phone']})).status,200);

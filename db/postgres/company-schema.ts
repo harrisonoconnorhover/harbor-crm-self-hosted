@@ -1,3 +1,5 @@
+import {recordUpdatedKey} from './record-updated-key';
+import {activeListSearchIndex,customIdentifierIndex,recordSearchIndex} from './search-index';
 import {sql} from 'drizzle-orm';
 import {check,foreignKey,index,integer,jsonb,pgTable,primaryKey,text,timestamp,unique,uuid} from 'drizzle-orm/pg-core';
 import type {CompanyFields} from '../../lib/portable-records';
@@ -15,6 +17,12 @@ export const companies=pgTable('companies',{
   createdAt:timestamp('created_at',{withTimezone:true,mode:'string'}).notNull(),
   updatedAt:timestamp('updated_at',{withTimezone:true,mode:'string'}).notNull(),
 },table=>[
+  index('companies_archived_time_page').on(table.workspaceId,recordUpdatedKey(table.archivedAt),table.id).where(sql`${table.archivedAt} IS NOT NULL`),
+  index('companies_recent_page').on(table.workspaceId,recordUpdatedKey(table.updatedAt),table.id).where(sql`${table.archivedAt} IS NULL`),
+  index('companies_active_domain').on(table.workspaceId,sql`lower(${table.data}->>'domain')`).where(sql`${table.archivedAt} IS NULL`),
+  activeListSearchIndex('companies_list_search',table.archivedAt,sql`${table.data}->>'name'`,sql`${table.data}->>'domain'`),
+  customIdentifierIndex('companies_custom_identifier',table.data,table.archivedAt),
+  recordSearchIndex('companies_search_values',table.data,table.archivedAt),
   primaryKey({columns:[table.workspaceId,table.id]}),
   foreignKey({name:'companies_merged_into_fk',columns:[table.workspaceId,table.mergedIntoId],foreignColumns:[table.workspaceId,table.id]}),
   check('companies_merged_archived',sql`${table.mergedIntoId} IS NULL OR (${table.archivedAt} IS NOT NULL AND ${table.mergedIntoId}<>${table.id})`),

@@ -27,12 +27,12 @@ export async function verifyPortableExternalApi({request,origin,headers,other,re
   await sql`DELETE FROM portable_request_budgets WHERE scope IN ('api_read','api_write') AND subject IN
     (SELECT id FROM login_identities WHERE email IN ('owner@example.test','other@example.test'))`;
 
-  assert.match(await (await get('/',headers)).text(),/href="\/\?view=api-access"/);
+  assert.match(await (await get('/?view=settings&section=data-management',headers)).text(),/href="\/\?view=api-access"/);
   const page=await get('/?view=api-access',headers);
   assert.equal(page.status,200);
   const pageHtml=await page.text();
-  assert.match(pageHtml,/Create read token/);
-  for(const kind of ['tasks','leads','tickets'])assert.match(pageHtml,new RegExp(`name="objects" value="${kind}"`));
+  assert.match(pageHtml,/Create record token/);
+  for(const kind of ['tasks','leads','tickets'])assert.match(pageHtml,new RegExp(`<select[^>]* name="${kind}"`));
   const noBearer=await get(contact,headers);
   assert.equal(noBearer.status,401);
   assert.equal(noBearer.headers.get('www-authenticate'),'Bearer');
@@ -43,7 +43,15 @@ export async function verifyPortableExternalApi({request,origin,headers,other,re
   assert.equal(batchWithoutBearer.headers.get('www-authenticate'),'Bearer');
   assert.equal((await list({})).status,401);
   assert.equal((await manage(contactAccess,headers,'https://elsewhere.example.test')).status,403);
-  assert.equal((await manage({...contactAccess,permission:'read_write'})).status,400);
+  const mixed=await manage({name:'Warehouse connector',days:30,permissions:{contacts:'read_write_archive',companies:'read',tasks:'read_write',leads:'read_write_archive',tickets:'read_write_archive'}});
+  assert.equal(mixed.status,201);
+  const {info:mixedInfo}=await mixed.json();
+  assert.deepEqual(mixedInfo.scopes,['contacts:read','contacts:write','contacts:archive','companies:read','tasks:read','tasks:write','leads:read','leads:write','leads:archive','tickets:read','tickets:write','tickets:archive']);
+  assert.ok((await manage({action:'revoke',id:mixedInfo.id})).ok);
+  for(const permissions of [{},{custom:'read'},{inquiries:'read_write'},{tickets:'delete'}]){
+    assert.equal((await manage({name:'Unsupported connector',days:30,permissions})).status,400);
+  }
+  assert.equal((await manage({...contactAccess,objects:['inquiries','contacts'],permission:'read_write'})).status,400);
   assert.equal((await manage({...contactAccess,objects:['contacts','files']})).status,400);
   assert.equal((await manage({...contactAccess,workspaceId:randomUUID()})).status,400);
 
@@ -113,11 +121,12 @@ export async function verifyPortableExternalApi({request,origin,headers,other,re
     {inputs:[{id:record.id,workspaceId:stored.workspace_id}]},
     {...batchInputs(record.id),idProperty:'email'},...[
       'name',null,[''],[123],['x'.repeat(151)],Array(101).fill('name'),['__proto__'],
-      ['amount'],['recordOwner'],['companyId'],['custom'],['custom:'+randomUUID()],
+      ['amount'],['recordOwner'],['companyId'],['custom:not-a-field-id'],['custom:'+randomUUID()],
     ].map(properties=>({...batchInputs(record.id),properties}))]){
     assert.equal((await batch('contacts',ownerAuth,invalid)).status,400);
   }
-  for(const query of ['?archived=true','?archived=','?archived=false&archived=false','?workspaceId='+stored.workspace_id]){
+  assert.equal((await batch('contacts',ownerAuth,batchInputs(record.id),'?archived=true')).status,403);
+  for(const query of ['?archived=','?archived=false&archived=false','?workspaceId='+stored.workspace_id]){
     assert.equal((await batch('contacts',ownerAuth,batchInputs(record.id),query)).status,400);
   }
   const overLimit=new ReadableStream({start(controller){
@@ -159,7 +168,7 @@ export async function verifyPortableExternalApi({request,origin,headers,other,re
     assert.equal((await get(base+'contacts?'+query,ownerAuth)).status,400);
   }
   for(const [method,path] of [['POST',base+'contacts'],['PATCH',contact],['DELETE',contact]]){
-    assert.equal((await request(path,{method,headers:ownerAuth})).status,404);
+    assert.equal((await request(path,{method,headers:ownerAuth})).status,403);
   }
   const first=await (await get(base+'contacts?limit=1',ownerAuth)).json();
   assert.equal(first.results.length,1);
@@ -282,7 +291,7 @@ export async function verifyPortableExternalApi({request,origin,headers,other,re
   assert.equal((await get(base+'tasks?workspaceId='+stored.workspace_id,taskAuth)).status,400);
   assert.equal((await get(base+'tasks?limit=51',taskAuth)).status,400);
   for(const [method,path] of [['POST',base+'tasks'],['PATCH',taskPath],['PUT',taskPath],['DELETE',taskPath]]){
-    assert.equal((await request(path,{method,headers:taskAuth})).status,404);
+    assert.equal((await request(path,{method,headers:taskAuth})).status,method==='PUT'?404:403);
   }
   const [earlier,later]=[task,secondTask].sort((a,b)=>a.id.localeCompare(b.id));
   const [previousTask]=await sql`SELECT id FROM portable_tasks WHERE workspace_id=${stored.workspace_id}
@@ -360,7 +369,7 @@ export async function verifyPortableExternalApi({request,origin,headers,other,re
     assert.equal((await get(collection+'?workspaceId='+stored.workspace_id,auth)).status,400);
     assert.equal((await get(collection+'?limit=51',auth)).status,400);
     for(const [method,endpoint] of [['POST',collection],['PATCH',detailPath],['PUT',detailPath],['DELETE',detailPath]]){
-      assert.equal((await request(endpoint,{method,headers:auth})).status,404);
+      assert.equal((await request(endpoint,{method,headers:auth})).status,method==='PUT'?404:403);
     }
     const [earlier,later]=[primary,secondary].sort((a,b)=>a.id.localeCompare(b.id));
     const [prior]=await sql`SELECT id FROM ${sql('portable_'+kind)} WHERE workspace_id=${stored.workspace_id}

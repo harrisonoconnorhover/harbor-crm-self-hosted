@@ -1,4 +1,4 @@
-import {and,eq,ne,sql} from 'drizzle-orm';
+import {and,eq,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {formNoteCapacityIssue} from '../../lib/portable-lead-forms';
 import {leadFormNoteSources as sources,leadInquiries as inquiries} from './lead-form-schema';
@@ -8,7 +8,7 @@ const overdueMs=5*60_000;
 export const formNoteOverdue=sql<boolean>`${sources.state}='waiting' AND ${sources.nextAt}<=
   floor(extract(epoch from statement_timestamp())*1000)::bigint-${overdueMs}`;
 
-export const openInquiry=and(eq(inquiries.handled,false),ne(inquiries.status,'removed'));
+export const openInquiry=sql<boolean>`NOT ${inquiries.handled} AND ${inquiries.status} <> 'removed'`;
 export const openFormNoteCapacitySkip=and(openInquiry,eq(sources.state,'skipped'),eq(sources.issue,formNoteCapacityIssue));
 
 export async function portableFormNoteStatus(db:PostgresJsDatabase){

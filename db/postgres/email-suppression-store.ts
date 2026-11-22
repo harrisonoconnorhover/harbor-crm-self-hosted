@@ -1,4 +1,4 @@
-import {and,asc,count,eq,gt,isNull,sql} from 'drizzle-orm';
+import {and,asc,count,eq,gt,isNull} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {ApiError} from '../../lib/api-error';
 import {randomSecret,sha256} from '../../lib/email/crypto';
@@ -6,6 +6,7 @@ import type {EmailSuppressionPage} from '../../lib/email/suppression';
 import {emailSuppressions as blocks,emailUnsubscribeTokens as tokens} from './email-suppression-schema';
 import {lockRecordWorkspace} from './private-workspace-store';
 import {privateWorkspaces} from './workspace-schema';
+import {matchesTextFields} from './search-index';
 
 type Db=PostgresJsDatabase;
 const fields={id:blocks.id,email:blocks.email,createdAt:blocks.createdAt,recipientOptedOutAt:blocks.recipientOptedOutAt};
@@ -19,7 +20,7 @@ export async function workspaceEmailBlocked(db:Db,workspaceId:string,email:strin
 export async function listEmailSuppressions(db:Db,actorId:string,query:string,after:string):Promise<EmailSuppressionPage>{
   const [workspace]=await db.select({id:privateWorkspaces.id}).from(privateWorkspaces).where(eq(privateWorkspaces.ownerId,actorId));
   if(!workspace)return {results:[],total:0,next:null};
-  const scope=and(eq(blocks.workspaceId,workspace.id),query?sql`strpos(${blocks.email},${query.toLowerCase()})>0`:undefined);
+  const scope=and(eq(blocks.workspaceId,workspace.id),matchesTextFields([blocks.email],query));
   const [rows,[total]]=await Promise.all([
     db.select(fields).from(blocks).where(and(scope,after?gt(blocks.email,after):undefined)).orderBy(asc(blocks.email)).limit(26),
     db.select({count:count()}).from(blocks).where(scope),

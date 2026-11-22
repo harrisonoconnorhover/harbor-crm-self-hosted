@@ -6,6 +6,7 @@ import {companyArchiveReceipts as receipts,companyEvents,companies} from './comp
 import {activeCompany} from './company-visibility';
 import {lockRecordWorkspace} from './private-workspace-store';
 import type {SharedRecordWriteScope} from '../../lib/portable-workspace-access';
+import {ownedRecordScope} from './record-ownership-scope';
 import {archiveAccessError,archivedByLabel,archiveWorkspaceScope} from './portable-archive-scope';
 import {privateWorkspaces} from './workspace-schema';
 
@@ -19,7 +20,7 @@ export async function readPortableCompanyArchive(db:Db,actorId:string,after?:str
     archivedBy:archivedByLabel(companyEvents,companyEvents.companyId,companies.id,companies.workspaceId,companies.revision)})
     .from(companies).innerJoin(privateWorkspaces,eq(privateWorkspaces.id,companies.workspaceId))
     // A merged Company lives on in the one it was merged into, so it isn't listed.
-    .where(and(archiveWorkspaceScope(db,actorId,shared),isNotNull(companies.archivedAt),isNull(companies.mergedIntoId),after?gt(companies.id,after):undefined))
+    .where(and(archiveWorkspaceScope(db,actorId,shared,companies),isNotNull(companies.archivedAt),isNull(companies.mergedIntoId),after?gt(companies.id,after):undefined))
     .orderBy(asc(companies.id)).limit(pageSize+1);
   const records:PortableArchivedRecord[]=rows.slice(0,pageSize).map(row=>({...row,archivedAt:at(row.archivedAt)!}));
   return {records,next:rows.length>pageSize?records.at(-1)!.id:null};
@@ -31,9 +32,13 @@ export async function readPortableCompanyArchive(db:Db,actorId:string,after?:str
 export function changePortableCompanyArchive(db:Db,actorId:string,input:PortableArchiveInput,shared?:SharedRecordWriteScope):Promise<PortableArchiveReceipt>{
   return db.transaction(async tx=>{
     // Link writers take this lock before checking that a Company is active.
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true,true,['companies','delete']);
     if(!workspaceId)throw shared?new ApiError(403,archiveAccessError):new ApiError(404,'Company not found in your workspace.');
     const {id,requestId,expectedRevision,action}=input;
+    const scope=and(eq(companies.workspaceId,workspaceId),eq(companies.id,id),shared?ownedRecordScope(tx,actorId,workspaceId,companies,'edit'):undefined);
+    const [company]=await tx.select({archivedAt:companies.archivedAt,revision:companies.revision,data:companies.data,mergedIntoId:companies.mergedIntoId})
+      .from(companies).where(scope).for('update');
+    if(!company)throw new ApiError(404,'Company not found in your workspace.');
     const [previous]=await tx.select().from(receipts).where(and(eq(receipts.workspaceId,workspaceId),eq(receipts.requestId,requestId)));
     if(previous){
       if(previous.companyId!==id||previous.action!==action||previous.revision!==expectedRevision+1){
@@ -41,10 +46,7 @@ export function changePortableCompanyArchive(db:Db,actorId:string,input:Portable
       }
       return {id,action,revision:previous.revision,archivedAt:at(previous.archivedAt)};
     }
-    const scope=and(eq(companies.workspaceId,workspaceId),eq(companies.id,id));
-    const [company]=await tx.select({archivedAt:companies.archivedAt,revision:companies.revision,data:companies.data,mergedIntoId:companies.mergedIntoId})
-      .from(companies).where(scope).for('update');
-    if(!company||company.mergedIntoId)throw new ApiError(404,'Company not found in your workspace.');
+    if(company.mergedIntoId)throw new ApiError(404,'Company not found in your workspace.');
     if(company.revision!==expectedRevision||Boolean(company.archivedAt)!==(action==='restore')){
       throw new ApiError(409,'This Company changed. Refresh before trying again.');
     }

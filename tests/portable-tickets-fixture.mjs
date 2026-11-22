@@ -271,7 +271,8 @@ export async function verifyPortableTickets({request,origin,headers,other,sql,wo
     assert.deepEqual([updated.revision,updated.contactId,updated.companyId],[3,contact.id,null]);
     const reopened=(await (await post(change(updated,'New'))).json()).record;
     assert.deepEqual([reopened.revision,reopened.closedAt,reopened.data.ticketStatus],[4,null,'New']);
-    assert.deepEqual(await (await get({id:open.id})).json(),reopened);
+    const reopenedDetail={...reopened,inboxConversationId:null};
+    assert.deepEqual(await (await get({id:open.id})).json(),reopenedDetail);
     const sharedPath=path+'?'+new URLSearchParams({workspaceId,grantId});
     const wrongGrant=path+'?'+new URLSearchParams({workspaceId,grantId:crypto.randomUUID()});
     const sharedCreate={action:'save',data:{name:'Shared editor ticket '+crypto.randomUUID()},contactId:contact.id,companyId:company.id};
@@ -344,7 +345,7 @@ export async function verifyPortableTickets({request,origin,headers,other,sql,wo
     await sql`ALTER TABLE portable_ticket_events ADD CONSTRAINT fixture_ticket_rollback CHECK (revision<>5)`;
     try{
       assert.equal((await post(change(reopened,'Closed'))).status,503);
-      assert.deepEqual(await (await get({id:open.id})).json(),reopened,'A failed history write rolls back the status change.');
+      assert.deepEqual(await (await get({id:open.id})).json(),reopenedDetail,'A failed history write rolls back the status change.');
     }finally{await sql`ALTER TABLE portable_ticket_events DROP CONSTRAINT fixture_ticket_rollback`;}
     assert.equal((await post(change(reopened,'Closed'))).status,200);
     const [revoked]=await sql`DELETE FROM portable_workspace_viewers WHERE id=${grantId} RETURNING *`;

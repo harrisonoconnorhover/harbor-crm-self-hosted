@@ -26,10 +26,16 @@ export function portableHistoryFields(kind:PortableRecordKind,customProperties:r
 export const portablePropertyHistoryQuery=z.object({
   kind:portableRecordKind,
   history:z.string().guid("Invalid uuid"),
-  field:z.string().min(1).max(80),
+  field:z.string().min(1).max(80).optional(),
+  search:z.string().trim().max(120).refine(value=>!value.includes('\0')).optional(),
+  afterField:z.string().min(1).max(80).optional(),
   workspaceId:z.string().guid("Invalid uuid").optional(),
   before:z.coerce.number().int().min(1).max(2147483647).optional(),
-}).strict().refine(input=>portableHistoryFields(input.kind).some(([id])=>id===input.field)||!!portableCustomHistoryId(input.field));
+}).strict().refine(input=>{
+  const known=(field:string)=>portableHistoryFields(input.kind).some(([id])=>id===field)||!!portableCustomHistoryId(field);
+  if(input.field)return known(input.field)&&input.afterField===undefined&&input.search===undefined;
+  return (input.before===undefined)===(input.afterField===undefined)&&(!input.afterField||known(input.afterField));
+});
 
 export type PortablePropertyHistoryQuery=z.output<typeof portablePropertyHistoryQuery>;
 type Value=CustomValue|null;
@@ -37,3 +43,9 @@ export type PortablePropertyChange={
   revision:number;occurredAt:string;actorName:string|null;previous:Value;value:Value;
 };
 export type PortablePropertyHistoryPage={items:PortablePropertyChange[];next:number|null};
+
+export type PortableHistoryCursor={revision:number;field:string};
+export type PortableRecordHistoryPage={
+  items:(PortablePropertyChange&{field:string;label:string})[];
+  next:PortableHistoryCursor|null;
+};

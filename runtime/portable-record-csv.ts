@@ -1,3 +1,4 @@
+import {recordAccess,recordPrimaryLinks} from '../db/postgres/record-access-store';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {listPortableSavedViews} from '../db/postgres/saved-view-store';
 import {listPortableCustomProperties} from '../db/postgres/custom-property-store';
@@ -31,10 +32,10 @@ function recordCsv(kind:PortableRecordKind,records:(ContactRecord|CompanyRecord|
     const values:Record<string,unknown>={...record.data,...record,lastContacted:lastContactedById?.[record.id]};
     return line(fields.map(([key])=>portableRecordListValue(record,values,key)));
   });
-  return [line(fields.map(([,label])=>label)),...rows].join('\r\n')+'\r\n';
+  return {text:[line(fields.map(([,label])=>label)),...rows].join('\r\n')+'\r\n',columns:fields.map(([id])=>id)};
 }
 
-export async function portableRecordCsv(db:PostgresJsDatabase,user:{userId:string;guest:boolean},query:Record<string,string>,head:boolean){
+export async function portableRecordCsv(db:PostgresJsDatabase,user:{userId:string;guest:boolean;email:string},query:Record<string,string>,head:boolean){
   const {export:format,savedView,...filters}=query;
   const error=(status:number,message:string)=>Response.json({error:message},{status,headers});
   if(user.guest||filters.workspaceId!==undefined)return error(403,'Export records from your own workspace.');
@@ -59,7 +60,12 @@ export async function portableRecordCsv(db:PostgresJsDatabase,user:{userId:strin
     ?await listPortableCustomProperties(db,user.userId,kind):[];
   const lastContactedById=!head&&kind==='contacts'&&view?.columns?.includes(portableLastContactedColumn.id)
     ?await readPortableLastContacted(db,user.userId,page.records.map(row=>row.id)):undefined;
-  return new Response(head?null:recordCsv(kind,page.records,view?.columns,custom,lastContactedById),{headers:{...headers,
+  const csv=head?null:recordCsv(kind,page.records,view?.columns,custom,lastContactedById);
+  if(csv){
+    await recordAccess(db,user,kind,'csv',page.records.map(row=>row.id));
+    await recordPrimaryLinks(db,user,page.records,undefined,csv.columns);
+  }
+  return new Response(csv?.text??null,{headers:{...headers,
     'content-type':'text/csv; charset=utf-8','content-disposition':`attachment; filename="harbor-${kind}.csv"`,
   }});
 }

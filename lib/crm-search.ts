@@ -10,6 +10,20 @@ export type SearchRow = { id: string; kind: Kind; data: Record<string, unknown> 
 export type SearchResult = { id: string; kind: Kind; name: string; detail: string };
 export type SearchPage = { results: SearchResult[]; total: number; page: number; size: number; counts: Record<Kind, number> };
 
+export const portableSearchKinds = [...kinds, "custom-objects"] as const;
+export type PortableSearchKind = typeof portableSearchKinds[number];
+const searchCursor=z.object({
+  direction:z.enum(["after","before"]), name:z.string().min(1).max(500).refine(name=>!name.includes("\0")),
+  id:z.string().guid(),kind:z.enum(portableSearchKinds),objectId:z.string().guid().optional(),
+}).strict().refine(cursor=>(cursor.kind==="custom-objects")===(cursor.objectId!==undefined));
+export type PortableSearchCursor=z.infer<typeof searchCursor>;
+export const portableSearchInput = searchInput.extend({kind: z.enum(portableSearchKinds).optional(),cursor:searchCursor.optional(),match:z.enum(["phrase","words"]).optional()});
+export type PortableSearchResult = SearchResult | {id: string; kind: "custom-objects"; objectId: string; name: string; detail: string};
+export type PortableSearchPage = Omit<SearchPage, "results" | "counts"> & {
+  start:number; next:PortableSearchCursor|null; previous:PortableSearchCursor|null;
+  results: PortableSearchResult[]; counts: Record<PortableSearchKind, number>;
+};
+
 function foldedSearchText(row: { data: Record<string, unknown> }) {
   const values: unknown[] = [];
   for (const value of Object.values(row.data)) {

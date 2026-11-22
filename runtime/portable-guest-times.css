@@ -1,0 +1,7 @@
+.lead-form-page:has(.portable-booking-times) { grid-template-columns: minmax(0,1fr); }
+.lead-form-card:has(.portable-booking-times) { min-width: 0; box-sizing: border-box; }
+.portable-booking-times select {
+  width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box;
+  padding: 10px; font: inherit; color: inherit; background: white;
+  border: 1px solid #c7d7da; border-radius: 6px;
+}

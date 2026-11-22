@@ -1,0 +1,7 @@
+ALTER TABLE "portable_inbox_messages" DROP CONSTRAINT "inbox_message_state";--> statement-breakpoint
+ALTER TABLE "portable_inbox_messages" ADD COLUMN "handoff_to_id" text;--> statement-breakpoint
+ALTER TABLE "portable_inbox_messages" ADD CONSTRAINT "portable_inbox_messages_handoff_to_id_login_identities_id_fk" FOREIGN KEY ("handoff_to_id") REFERENCES "public"."login_identities"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portable_inbox_messages" ADD CONSTRAINT "inbox_message_state" CHECK (("portable_inbox_messages"."direction"='incoming' AND "portable_inbox_messages"."state"='received' AND "portable_inbox_messages"."provider_id" IS NOT NULL AND "portable_inbox_messages"."actor_id" IS NULL AND "portable_inbox_messages"."handoff_to_id" IS NULL)
+    OR ("portable_inbox_messages"."direction"='outgoing' AND "portable_inbox_messages"."state" IN ('sending','sent','uncertain','failed') AND "portable_inbox_messages"."actor_id" IS NOT NULL AND "portable_inbox_messages"."internet_id" IS NOT NULL AND "portable_inbox_messages"."handoff_to_id" IS NULL)
+    OR ("portable_inbox_messages"."direction"='internal' AND "portable_inbox_messages"."state"='handoff' AND "portable_inbox_messages"."actor_id" IS NOT NULL AND "portable_inbox_messages"."handoff_to_id" IS NOT NULL
+      AND "portable_inbox_messages"."provider_id" IS NULL AND "portable_inbox_messages"."internet_id" IS NULL AND "portable_inbox_messages"."in_reply_to" IS NULL AND length("portable_inbox_messages"."body")<=2000));

@@ -1,5 +1,6 @@
 'use client';
 
+import {WorkspaceDate} from './portable-workspace-format';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 
 type Cursor={token:string;proof:string};
@@ -208,7 +209,7 @@ export function PortableGmailInbox({recordId,onLogged}:{recordId:string;onLogged
         const feedback=logFeedback&&logFeedback.proof===selection?.proof?logFeedback:null;
         return <li key={item.id}>
           <strong>{item.subject||'(No subject)'}</strong>
-          <p>{item.sender}{' · '}{time?<time dateTime={time.toISOString()}>{time.toLocaleString()}</time>:'Date unavailable'}</p>
+          <p>{item.sender}{' · '}{time?<time dateTime={time.toISOString()}><WorkspaceDate value={time.getTime()}>{time.toLocaleString()}</WorkspaceDate></time>:'Date unavailable'}</p>
           {selection&&<button type="button" disabled={logging} aria-expanded={!!active} onClick={()=>{
             if(active)closePreview();
             else void openPreview(selection);

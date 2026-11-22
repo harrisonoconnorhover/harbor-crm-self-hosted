@@ -6,12 +6,13 @@ import type {QueueView,readOwnerQueue} from '../db/postgres/job-operations-store
 import {jobDetailsHref,jobIssueLabel,jobKindLabels,jobKinds,jobQueueViewLabels,jobStatusLabel,portableJobId,queueIssueLabels,queueIssues,type JobKind,type QueueIssue} from '../lib/portable-job-labels';
 import {queuedRecipientBlockedNotice} from '../lib/email/suppression';
 import {PortableRecordPicker} from './portable-record-picker';
+import {PortableSettingsLayout} from './portable-settings-layout';
 import {PortableCrmHeader} from './portable-crm-header';
 import './portable-contacts.css';
 
 type Page=Awaited<ReturnType<typeof readOwnerQueue>>;
 type QueueFilters={kind?:JobKind;issue?:QueueIssue;contactId?:string;finishedFirst?:boolean};
-type JobAction='retryNote'|'retryTask'|'cancelNote'|'cancelGmail'|'cancelTask'|'reviewGmail'|'reviewExternal'|'reviewFailed'|'reviewSuppressedGmail';
+type JobAction='retryNote'|'retryTask'|'cancelNote'|'cancelGmail'|'cancelTask'|'cancelEventWait'|'reviewGmail'|'reviewExternal'|'reviewFailed'|'reviewSuppressedGmail';
 const views=jobQueueViewLabels;
 const heartbeatLabels={missing:'No worker heartbeat recorded',invalid:'Worker heartbeat time is invalid',
   stale:'Worker has stopped reporting',fresh:'Worker reporting'};
@@ -116,11 +117,12 @@ export function PortableJobOperations({email,view,kind,issue,page,focused,finish
   const filters={kind,issue,contactId:page.contact?.id,finishedFirst};
   const receipt=focused?page.items[0]:undefined;
   const source=receipt?.sourceDealWorkflow;
+  const ticketSource=receipt?.sourceTicketWorkflow;
   async function act(job:Page['items'][number],action:JobAction){
     if(requesting.current)return;
     const retry=action==='retryNote'||action==='retryTask';
     const review=action==='reviewGmail',external=action==='reviewExternal',failed=action==='reviewFailed',suppressed=action==='reviewSuppressedGmail';
-    const label=job.kind==='gmail'?'scheduled email':job.kind==='task'?'scheduled Task':'scheduled Note';
+    const label=action==='cancelEventWait'?'waiting workflow action and stop the rest of its path':job.kind==='gmail'?'scheduled email':job.kind==='task'?'scheduled Task':'scheduled Note';
     if(!retry&&!window.confirm(review
       ?'Mark this email reviewed? Its delivery will stay unconfirmed, and Harbor will keep it from sending again.'
       :external?'Mark this external action reviewed? Its outcome will stay unconfirmed.'
@@ -150,6 +152,7 @@ export function PortableJobOperations({email,view,kind,issue,page,focused,finish
   }
   return <main className="portable-contacts">
     <PortableCrmHeader email={email} page="job-queue"/>
+    <PortableSettingsLayout active="job-queue">
     <section>
       <div className="portable-contacts-heading"><h1>{focused?'Job details':'Job queue'}</h1>
         {focused?<><a href={queueLink('issues')}>Back to Job queue</a>
@@ -167,6 +170,14 @@ export function PortableJobOperations({email,view,kind,issue,page,focused,finish
           {source.dealArchived?<span>{source.dealName} (archived)</span>:
             <a href={'/?'+new URLSearchParams({kind:'deals',record:source.dealId})}>{source.dealName}</a>}
           <a href={'/?'+new URLSearchParams({view:'workflows',runDealId:source.dealId})+'#recent-runs'}>View Deal workflow runs</a>
+        </nav>
+      </section>}
+      {ticketSource&&<section aria-label="Workflow source">
+        <p>Workflow <strong>{ticketSource.workflowName}</strong></p>
+        <nav aria-label="Source Ticket links">
+          {ticketSource.archived?<span>{ticketSource.ticketName} (archived)</span>:
+            <a href={'/tickets?id='+ticketSource.ticketId}>{ticketSource.ticketName}</a>}
+          <a href={'/?view=workflows&runWorkflowId='+ticketSource.workflowId+'#recent-runs'}>View workflow runs</a>
         </nav>
       </section>}
       {receipt&&<JobReceiptCopy key={receipt.id} jobId={receipt.id}/>}
@@ -273,9 +284,11 @@ export function PortableJobOperations({email,view,kind,issue,page,focused,finish
               {job.canRetry&&<p><button type="button" disabled={pendingId!==null} onClick={()=>void act(job,job.kind==='task'?'retryTask':'retryNote')}>
                 {pendingId===job.id?'Queueing…':job.kind==='task'?'Retry Task':'Retry Note'}</button></p>}
               {job.canCancel&&<p><button type="button" disabled={pendingId!==null}
-                onClick={()=>void act(job,job.kind==='gmail'?'cancelGmail':job.kind==='task'?'cancelTask':'cancelNote')}>
-                {pendingId===job.id?'Cancelling…':job.kind==='gmail'?'Cancel email':job.kind==='task'?'Cancel Task':'Cancel Note'}</button></p>}</td>
-            <td>{time(job.scheduledFor)}
+                onClick={()=>void act(job,job.kind==='external'?'cancelEventWait':job.kind==='gmail'?'cancelGmail':job.kind==='task'?'cancelTask':'cancelNote')}>
+                {pendingId===job.id?'Cancelling…':job.kind==='external'?'Cancel waiting action':job.kind==='gmail'?'Cancel email':job.kind==='task'?'Cancel Task':'Cancel Note'}</button></p>}</td>
+            <td>{job.waitForLifecycle
+              ?job.status==='queued'?'Waiting for '+job.waitForLifecycle:'—'
+              :time(job.scheduledFor)}
               {job.sendDeadline!==null&&<p>Send window ends {time(job.sendDeadline)}</p>}
               {job.status==='queued'&&job.overdue&&<p>Waiting since {time(job.operatorRetryAt??job.scheduledFor)}</p>}
               {job.status==='queued'&&job.attempts>0&&<p>Next attempt {time(job.availableAt)}</p>}
@@ -286,5 +299,6 @@ export function PortableJobOperations({email,view,kind,issue,page,focused,finish
       </table></div>:<p>No jobs in this view.</p>}
       {page.next&&<nav aria-label="Job pages"><a href={queueLink(view,filters,page.next)}>Older jobs</a></nav>}
     </section>
+    </PortableSettingsLayout>
   </main>;
 }

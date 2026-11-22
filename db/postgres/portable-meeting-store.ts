@@ -1,3 +1,4 @@
+import {bookedTeamTime,lockBookingHosts} from './team-booking-store';
 import {and,desc,eq,or,sql,type SQL} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {PortableInvite,PortableReschedule} from '../../lib/calendar/portable-meetings';
@@ -69,23 +70,24 @@ export async function listPortableMeetings(db:Db,ownerId:string,after?:{at:numbe
 
 // One snapshot covers both tables. A concurrent successful reschedule moves
 // the proposed slot to the meeting and clears the hold in the same commit.
-function slotHeldCondition(workspaceId:string|SQL,start:number|SQL,end:number|SQL,except?:string){
+function slotHeldCondition(workspaceId:string|SQL,ownerId:string,start:number|SQL,end:number|SQL,except?:string){
   return sql`
-    EXISTS (SELECT 1 FROM ${meetings} WHERE workspace_id=${workspaceId}
+    ${bookedTeamTime(sql`${ownerId}`,start,end)}
+    OR EXISTS (SELECT 1 FROM ${meetings} WHERE workspace_id=${workspaceId}
       AND status NOT IN ('cancelled','rejected') AND end_at>${start} AND start_at<${end}
       ${except?sql`AND id<>${except}`:sql``})
     OR EXISTS (SELECT 1 FROM ${changes} WHERE workspace_id=${workspaceId}
       AND status IN ('submitting','attention') AND end_at>${start} AND start_at<${end})
   `;
 }
-async function slotHeld(db:Pick<Db,'execute'>,workspaceId:string|SQL,start:number,end:number,except?:string){
-  const [row]=await db.execute<{held:boolean}>(sql`SELECT (${slotHeldCondition(workspaceId,start,end,except)}) AS held`);
+async function slotHeld(db:Pick<Db,'execute'>,workspaceId:string|SQL,ownerId:string,start:number,end:number,except?:string){
+  const [row]=await db.execute<{held:boolean}>(sql`SELECT (${slotHeldCondition(workspaceId,ownerId,start,end,except)}) AS held`);
   return row.held;
 }
 
 const ownerWorkspace=(ownerId:string)=>sql`(SELECT ${privateWorkspaces.id} FROM ${privateWorkspaces} WHERE ${privateWorkspaces.ownerId}=${ownerId})`;
 export function portableCalendarSlotHeld(db:Db,ownerId:string,start:number,end:number){
-  return slotHeld(db,ownerWorkspace(ownerId),start,end);
+  return slotHeld(db,ownerWorkspace(ownerId),ownerId,start,end);
 }
 
 export async function portableOpenCalendarSlots(db:Db,ownerId:string,slots:CalendarSlot[]){
@@ -94,7 +96,7 @@ export async function portableOpenCalendarSlots(db:Db,ownerId:string,slots:Calen
   const rows=await db.execute<CalendarSlot>(sql`
     SELECT candidate.value->>'start' AS start,candidate.value->>'end' AS end
     FROM jsonb_array_elements(${JSON.stringify(candidates)}::jsonb) WITH ORDINALITY candidate(value,position)
-    WHERE NOT (${slotHeldCondition(ownerWorkspace(ownerId),sql`(candidate.value->>'from')::bigint`,sql`(candidate.value->>'to')::bigint`)})
+    WHERE NOT (${slotHeldCondition(ownerWorkspace(ownerId),ownerId,sql`(candidate.value->>'from')::bigint`,sql`(candidate.value->>'to')::bigint`)})
     ORDER BY candidate.position
   `);
   return Array.from(rows);
@@ -115,7 +117,8 @@ export function reservePortableMeeting(db:Db,ownerId:string,accountId:string,inp
     if(await workspaceEmailBlocked(tx,workspaceId,input.recipient))return {result:'blocked'} as const;
     const start=Date.parse(input.start),end=Date.parse(input.end),at=await jobClock(tx);
     if(start<=at||end>at+366*86_400_000)return {result:'invalid_time'} as const;
-    if(await slotHeld(tx,workspaceId,start,end))return {result:'overlap'} as const;
+    await lockBookingHosts(tx,[ownerId]);
+    if(await slotHeld(tx,workspaceId,ownerId,start,end))return {result:'overlap'} as const;
     const [row]=await tx.insert(meetings).values({workspaceId,id:input.id,contactId:input.contactId,ownerId,accountId,
       input,start,end,createdAt:at,status:'submitting'}).returning();
     return {result:'reserved',row} as const;
@@ -174,7 +177,8 @@ export function reservePortableReschedule(db:Db,row:Meeting,input:PortableResche
     const start=Date.parse(input.start),end=Date.parse(input.end),at=await jobClock(tx);
     if(current.start<=at||start<=at||end>at+366*86_400_000)return {result:'invalid_time'} as const;
     if(start===current.start&&end===current.end&&input.timeZone===(current.rescheduledTimeZone??current.input.timeZone))return {result:'unchanged'} as const;
-    if(await slotHeld(tx,workspaceId,start,end,row.id))return {result:'overlap'} as const;
+    await lockBookingHosts(tx,[row.ownerId]);
+    if(await slotHeld(tx,workspaceId,row.ownerId,start,end,row.id))return {result:'overlap'} as const;
     const [change]=await tx.insert(changes).values({workspaceId,id:input.id,meetingId:row.id,input,originalEtag,start,end,createdAt:at,status:'submitting'}).returning();
     return {result:'reserved',change} as const;
   });

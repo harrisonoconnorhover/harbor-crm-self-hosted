@@ -17,7 +17,7 @@ export const portableDuplicateAction=z.object({action:z.enum(['dismiss','restore
   .strict().refine(input=>input.recordA!==input.recordB);
 export type PortableDuplicateAction=z.infer<typeof portableDuplicateAction>;
 
-export type PortableDuplicateRecord={id:string;revision:number;name:string;email?:string;phone?:string;domain?:string;city?:string;company?:string};
+export type PortableDuplicateRecord={id:string;revision:number;name:string;email?:string;phone?:string;domain?:string;city?:string;company?:string;companyId?:string};
 export type PortableDuplicatePair={left:PortableDuplicateRecord;right:PortableDuplicateRecord;score:number;reasons:string[];dismissedAt?:string};
 export type PortableDuplicatePage={pairs:PortableDuplicatePair[];nextCursor:string|null;total:number;limited:boolean;recordsChecked:number};
 export const portableDuplicatesLink=(kind:'contacts'|'companies',workspaceId?:string)=>

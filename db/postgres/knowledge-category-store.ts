@@ -1,14 +1,15 @@
 import {and,asc,eq,isNotNull,isNull,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {ApiError} from '../../lib/api-error';
+import type {z} from 'zod';
+import {literalSearchPattern} from './search-index';
 import {foldArticleText} from '../../lib/knowledge-base';
-import type {PortableKnowledgeCategory,PortableKnowledgeCategoryMutation} from '../../lib/portable-knowledge';
+import type {KnowledgeCategoryPage,portableKnowledgeCategoryQuery,PortableKnowledgeCategoryMutation} from '../../lib/portable-knowledge';
 import {knowledgeArticles as articles,knowledgeCategories as categories} from './knowledge-schema';
 import {lockRecordWorkspace} from './private-workspace-store';
 import {privateWorkspaces as workspaces} from './workspace-schema';
 
 type Tx=Parameters<Parameters<PostgresJsDatabase['transaction']>[0]>[0];
-const limit=200;
 const unavailable=()=>new ApiError(404,'Category is unavailable.');
 
 const projection={
@@ -21,11 +22,21 @@ const projection={
     AND c.parent_id=${categories.id} AND c.archived_at IS NULL)`,
 };
 
-export async function listPortableKnowledgeCategories(db:PostgresJsDatabase,actorId:string,status:'active'|'archived'):Promise<PortableKnowledgeCategory[]>{
+export function readOwnedKnowledgeCategory(db:PostgresJsDatabase,actorId:string,id:string){
+  return db.select(projection).from(categories).innerJoin(workspaces,eq(workspaces.id,categories.workspaceId))
+    .where(and(eq(workspaces.ownerId,actorId),eq(categories.id,id))).then(rows=>rows[0]);
+}
+
+export async function listPortableKnowledgeCategories(db:PostgresJsDatabase,actorId:string,query:z.output<typeof portableKnowledgeCategoryQuery>):Promise<KnowledgeCategoryPage>{
+  const {status,q,limit,afterName,afterId,topLevel}=query;
   const rows=await db.select(projection).from(categories).innerJoin(workspaces,eq(workspaces.id,categories.workspaceId))
-    .where(and(eq(workspaces.ownerId,actorId),status==='archived'?isNotNull(categories.archivedAt):isNull(categories.archivedAt)))
-    .orderBy(asc(categories.nameKey),asc(categories.id)).limit(limit);
-  return rows;
+    .where(and(eq(workspaces.ownerId,actorId),status==='archived'?isNotNull(categories.archivedAt):isNull(categories.archivedAt),
+      topLevel?isNull(categories.parentId):undefined,
+      q?sql`(${categories.nameKey} COLLATE "C") LIKE ${literalSearchPattern(foldArticleText(q))}`:undefined,
+      afterId?sql`(${categories.nameKey},${categories.id})>(${foldArticleText(afterName??'')},${afterId}::uuid)`:undefined))
+    .orderBy(asc(categories.nameKey),asc(categories.id)).limit(limit+1);
+  const last=rows[limit-1];
+  return {items:rows.slice(0,limit),next:rows.length>limit?{afterName:last.name,afterId:last.id}:null};
 }
 
 async function find(tx:Tx,workspaceId:string,id:string,lock?:'update'|'share'){

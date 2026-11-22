@@ -1,0 +1,4 @@
+ALTER TABLE "portable_record_access_events" DROP CONSTRAINT "record_access_kind";--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD CONSTRAINT "record_access_kind" CHECK ((("portable_record_access_events"."kind" IN ('contacts','companies','deals','tasks','leads','tickets') AND "portable_record_access_events"."custom_object_id" IS NULL) OR
+    ("portable_record_access_events"."kind" IN ('products','quotes','invoices') AND "portable_record_access_events"."custom_object_id" IS NULL AND ("portable_record_access_events"."action" IN ('list','detail','csv') OR ("portable_record_access_events"."kind" IN ('quotes','invoices') AND "portable_record_access_events"."action"='document'))) OR
+    ("portable_record_access_events"."kind"='custom-objects' AND "portable_record_access_events"."custom_object_id" IS NOT NULL AND "portable_record_access_events"."action" IN ('detail','list','search','related','csv'))));

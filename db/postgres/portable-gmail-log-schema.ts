@@ -1,4 +1,4 @@
-import {bigint,pgTable,primaryKey,text,timestamp,unique,uuid} from 'drizzle-orm/pg-core';
+import {bigint,index,pgTable,primaryKey,text,timestamp,unique,uuid} from 'drizzle-orm/pg-core';
 import {privateWorkspaces} from './workspace-schema';
 
 // Keep the receipt after the activity is removed, without retaining its body.
@@ -13,5 +13,6 @@ export const portableGmailLogReceipts=pgTable('portable_gmail_log_receipts',{
   activityId:uuid('activity_id').notNull(),
 },table=>[
   primaryKey({columns:[table.workspaceId,table.mailbox,table.messageId]}),
+  index('portable_gmail_contact_received').on(table.workspaceId,table.contactId,table.mailbox,table.occurredAt),
   unique('portable_gmail_log_activity').on(table.workspaceId,table.activityId),
 ]);

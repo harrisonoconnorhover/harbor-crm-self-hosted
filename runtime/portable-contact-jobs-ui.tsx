@@ -1,5 +1,6 @@
 'use client';
 
+import {WorkspaceDate} from './portable-workspace-format';
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {jobDetailsHref,jobIssueLabel,jobStatusLabel} from '../lib/portable-job-labels';
 import {scheduledInstants} from '../lib/email/schedule';
@@ -8,10 +9,10 @@ import {PortableGmailComposer} from './portable-gmail-composer';
 
 type Cursor={at:number;id:string};
 type Receipt={number:number;startedAt:number;endedAt:number|null;outcome:string|null};
-type Job={id:string;body:string;kind:string;gmail:{sender:string;recipient:string;subject:string;providerId:string|null}|null;status:string;attempts:number;issue:string|null;scheduledFor:number;availableAt:number;finishedAt:number|null;operatorReviewedAt:number|null;recipientBlocked:boolean;receipts:Receipt[]};
+type Job={id:string;body:string;actorEmail:string;kind:string;gmail:{sender:string;recipient:string;subject:string;providerId:string|null}|null;status:string;attempts:number;issue:string|null;waitForLifecycle?:string|null;scheduledFor:number;availableAt:number;finishedAt:number|null;operatorReviewedAt:number|null;recipientBlocked:boolean;receipts:Receipt[]};
 type Page={items:Job[];next:Cursor|null};
 type Request={id:string;body:string;scheduledFor:number};
-const time=(at:number)=>new Date(at).toLocaleString();
+const time=(at:number)=><WorkspaceDate value={at}/>;
 const noteSubmitDeadlineMs=12_000;
 
 export function PortableContactJobs({recordId,workspaceId,grantId,readOnly,gmail}:{
@@ -21,6 +22,7 @@ export function PortableContactJobs({recordId,workspaceId,grantId,readOnly,gmail
   if(workspaceId)query.set('workspaceId',workspaceId);
   const base='/api/background-jobs?'+query;
   const [page,setPage]=useState<Page>();
+  const [accessLost,setAccessLost]=useState(false);
   const [after,setAfter]=useState<Cursor>();
   const [refresh,setRefresh]=useState(0);
   const pending=useRef<Request|null>(null);
@@ -35,9 +37,14 @@ export function PortableContactJobs({recordId,workspaceId,grantId,readOnly,gmail
     const controller=new AbortController();
     const cursor=after?'&'+new URLSearchParams({afterAt:String(after.at),afterId:after.id}):'';
     fetch(base+cursor,{signal:controller.signal}).then(async response=>{
+      if(controller.signal.aborted)return;
+      if([401,403,404].includes(response.status)){
+        setAccessLost(true);setPage(undefined);setQueuedNoteId(undefined);setStatus('');setError('');
+        return;
+      }
       if(!response.ok)throw Error();
       const result=await response.json() as Page;
-      if(!controller.signal.aborted)setPage(result);
+      if(!controller.signal.aborted){setAccessLost(false);setPage(result);}
     }).catch(()=>{if(!controller.signal.aborted)setError('Could not load scheduled notes.');});
     return ()=>controller.abort();
   },[base,after,refresh]);
@@ -110,6 +117,8 @@ export function PortableContactJobs({recordId,workspaceId,grantId,readOnly,gmail
 
   return <section id="portable-contact-jobs" className="portable-record-panel" aria-label="Scheduled notes" tabIndex={-1}>
     <h2>Scheduled notes</h2>
+    {accessLost?<><p role="status">You no longer have access to these scheduled notes.</p>
+      <button type="button" onClick={()=>window.location.reload()}>Reload contact</button></>:<>
     {!workspaceId&&<a href={'/?'+new URLSearchParams({view:'job-queue',queue:'all',jobContactId:recordId})}>
       View all jobs for this contact
     </a>}
@@ -134,14 +143,17 @@ export function PortableContactJobs({recordId,workspaceId,grantId,readOnly,gmail
       {job.kind==='gmail'&&(job.status==='queued'||job.status==='running')&&
         <button type="button" disabled={saving} onClick={()=>void cancel(job.id)}>Cancel email</button>}
       {' · '}{job.attempts} {job.attempts===1?'attempt':'attempts'}
-      {job.status==='queued'&&<> · {job.attempts?'Next attempt':'Due'} {time(job.availableAt)}</>}
+      {job.status==='queued'&&(job.waitForLifecycle?<> · Waiting for {job.waitForLifecycle}</>
+        :<> · {job.attempts?'Next attempt':'Due'} {time(job.availableAt)}</>)}
       {job.issue&&<> · {jobIssueLabel(job.issue)}</>}
       {job.recipientBlocked&&<p>{queuedRecipientBlockedNotice}</p>}
       <details>
         <summary>Run details</summary>
+        <p>Scheduled by {job.actorEmail}</p>
         <p>Job ID <code>{job.id}</code></p>
         {job.gmail?.providerId&&<p>Gmail receipt <code>{job.gmail.providerId}</code></p>}
-        <p>Scheduled for {time(job.scheduledFor)}{job.finishedAt!==null&&<> · Finished {time(job.finishedAt)}</>}</p>
+        {!job.waitForLifecycle&&<p>Scheduled for {time(job.scheduledFor)}</p>}
+        {job.finishedAt!==null&&<p>Finished {time(job.finishedAt)}</p>}
         {job.receipts.length?<ol>{job.receipts.map(receipt=><li key={receipt.number}>
           Started {time(receipt.startedAt)}
           {receipt.endedAt!==null&&<> · Ended {time(receipt.endedAt)}</>}
@@ -151,5 +163,6 @@ export function PortableContactJobs({recordId,workspaceId,grantId,readOnly,gmail
     </li>)}</ul>:<p>{page?'No scheduled notes on this page.':'Loading scheduled notes…'}</p>}
     {after&&<button type="button" onClick={()=>setAfter(undefined)}>Newest notes</button>}{' '}
     {page?.next&&<button type="button" onClick={()=>setAfter(page.next??undefined)}>Older notes</button>}
+    </>}
   </section>;
 }

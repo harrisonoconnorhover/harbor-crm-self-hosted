@@ -1,0 +1,5 @@
+.published-article-picker { max-width:36rem; padding-block:.5rem; }
+.published-article-picker ul { list-style:none; padding:0; }
+.published-article-picker li { display:flex; gap:12px; align-items:center; justify-content:space-between; padding:.45rem 0; border-bottom:1px solid #dbe4e2; }
+.published-article-picker li a { overflow-wrap:anywhere; }
+.published-article-picker li button { flex:none; }

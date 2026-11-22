@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {filterFields,type FilterField} from './filters';
-import {propertyGroupInput} from './property-groups';
+import {normalizePropertyOrganization,propertyGroupInput,type PropertyOrganization} from './property-groups';
 import {customTextLimit,propertyTypeLabel} from './property-text';
 import type {CustomValue} from './property-values';
 import {standardFields} from './standard-properties';
@@ -24,9 +24,11 @@ export const portablePropertyGroupWrite=propertyGroupInput.extend({
 }).strict();
 export type PortablePropertyGroupWrite=z.output<typeof portablePropertyGroupWrite>;
 
+const audience=z.union([z.literal('workspace'),z.literal('owner'),id]);
 export const portableCustomPropertyWrite=z.discriminatedUnion('action',[
-  z.object({action:z.literal('create'),kind:portableCustomPropertyKinds,label,type,
+  z.object({action:z.literal('create'),kind:portableCustomPropertyKinds,label,type,audience:audience.optional(),
     options:z.array(z.string().trim().min(1).max(80)).max(50).default([])}).strict(),
+  z.object({action:z.literal('access'),kind:portableCustomPropertyKinds,id,audience,expectedRevision:z.number().int().min(1).max(2147483646)}).strict(),
   z.object({action:z.literal('rename'),kind:portableCustomPropertyKinds,id,label,
     expectedRevision:z.number().int().min(1).max(2147483646)}).strict(),
 ]);
@@ -42,7 +44,7 @@ export type PortableCustomPropertyWrite=z.output<typeof portableCustomPropertyWr
 export type PortableCustomPatch=z.output<typeof portableCustomPatch>;
 export type PortableCustomValues=Record<string,CustomValue>;
 export type PortableCustomProperty={
-  id:string;kind:PortableCustomPropertyKind;label:string;type:PortableCustomPropertyType;options:string[];revision:number;
+  id:string;kind:PortableCustomPropertyKind;label:string;type:PortableCustomPropertyType;options:string[];revision:number;audience?:string;
 };
 
 const portableGroupCoreFields={
@@ -59,6 +61,14 @@ export function portablePropertyGroupFields(kind:PortableCustomPropertyKind,
     id:'custom:'+id,label,type:type==='textarea'?'text':type,options,multiline:type==='textarea',
   }));
   return [...core,...standardFields(kind),...custom];
+}
+
+// Only serialize custom groups that contain a property this viewer may read.
+export function visiblePropertyOrganization(kind:PortableCustomPropertyKind,properties:PortableCustomProperty[],config:PropertyOrganization):PropertyOrganization{
+  const fields=portablePropertyGroupFields(kind,properties.filter(property=>property.kind===kind));
+  const {assignments}=normalizePropertyOrganization(kind,fields,config);
+  const assigned=new Set(Object.values(assignments));
+  return {assignments,groups:config.groups.filter(group=>assigned.has(group.id))};
 }
 
 export const customPropertyTypeLabels:Record<PortableCustomPropertyType,string>={

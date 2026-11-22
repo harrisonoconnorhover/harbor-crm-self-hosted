@@ -1,0 +1,2 @@
+ALTER TABLE "private_workspaces" ADD COLUMN "round_robin_leads" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "private_workspaces" ADD CONSTRAINT "workspace_lead_distribution" CHECK (NOT ("private_workspaces"."round_robin_leads" AND "private_workspaces"."balance_leads_by_capacity"));

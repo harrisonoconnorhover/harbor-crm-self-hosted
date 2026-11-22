@@ -4,8 +4,11 @@ import {enabledLeadForm} from '../db/postgres/lead-form-store';
 import {leadFormEmbedOrigin} from '../lib/lead-form-embedding';
 import {drizzle,type PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {portableMigrationHistory,readPortableMigrations} from './portable-migrations.mjs';
-import {googleLoginCallbackPath,googleLoginSetupIssues,loginConfig} from '../lib/identity';
-import {microsoftCallbackPath,microsoftLoginSettings,portableLoginConfig,portableLoginProviders,portableRequestFailure} from './portable-login-config';
+import {googleLoginCallbackPath,googleLoginSetupIssues} from '../lib/identity';
+import {oidcSettings,oidcCallbackPath} from './portable-company-oidc-config';
+import {checkSamlMetadataFile} from './portable-saml-metadata-check';
+import {samlCallbackPath,samlLoginSettings,samlMetadataPath} from './portable-saml-config';
+import {oidcDirectoryAuthority,portableOidcDirectoryConfig,directoryAuthority,microsoftCallbackPath,microsoftLoginSettings,samlDirectoryAuthority,portableSamlDirectoryConfig,portableDirectoryConfig,portableLoginConfig,portableLoginProviders,portableRequestFailure} from './portable-login-config';
 import {googleSigningKeysEndpoint,googleTokenEndpoint} from '../lib/google-identity';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {portableCalendarCancellationsEnabled,portableCalendarConfig,portableCalendarInvitesEnabled,
@@ -19,8 +22,9 @@ import {GMAIL_READ_SCOPE,GMAIL_SCOPES,GmailError} from '../lib/email/gmail';
 import {portableDatabaseUrl,portableMode,portableStorageEndpoint,portableWebAddress} from './portable-config.mjs';
 import {env} from './portable-env';
 import {assertObjectStorageAvailable,checkFilePrivacy,objectStorageConfigured} from './portable-object-storage';
-import {readPortableDatabaseStatus} from './portable-database-status';
+import {boundedStatusTransaction,readPortableDatabaseTransaction,type StatusQuery} from './portable-database-status';
 import postgres from 'postgres';
+import {sql} from 'drizzle-orm';
 
 const migrations=readPortableMigrations(fileURLToPath(new URL('../../../db/postgres/migrations',import.meta.url)));
 let client:ReturnType<typeof postgres>|undefined;
@@ -45,7 +49,7 @@ export function validateHostedWebStorage(){
   if(!objectStorageConfigured())throw Error('Configure private S3 storage for hosted Harbor.');
 }
 
-async function schemaState(db:ReturnType<typeof postgres>){
+async function schemaState(db:StatusQuery){
   try{return (await portableMigrationHistory(db,migrations)).status;}
   catch{return 'unavailable';}
 }
@@ -54,10 +58,10 @@ async function checkRelease(){
   let timer:ReturnType<typeof setTimeout>|undefined;
   try{
     const url=portableDatabaseUrl(process.env,portableMode(process.env));
-    const current=client??=postgres(url.href,{max:1,connect_timeout:3,connection:{statement_timeout:3000}});
+    const current=client??=postgres(url.href,{max:1,connect_timeout:3});
     // Postgres timeouts cannot bound a reply lost on an established socket.
     const deadline=new Promise<'timeout'>(resolve=>{timer=setTimeout(()=>resolve('timeout'),releaseDeadlineMs);});
-    const status=await Promise.race([schemaState(current),deadline]);
+    const status=await Promise.race([boundedStatusTransaction(current,schemaState),deadline]);
     if(status==='timeout'){
       client=undefined;
       frameDb=undefined;
@@ -106,7 +110,11 @@ export function portableIdentitySetupFailure(request:Request){
 export async function portableFormFrameAncestor(id:string){
   if(!client)return undefined;
   try{
-    const form=await enabledLeadForm(frameDb??=drizzle(client),id);
+    const db=frameDb??=drizzle(client);
+    const form=await db.transaction(async tx=>{
+      await tx.execute(sql`SET LOCAL statement_timeout = '3s'`);
+      return enabledLeadForm(tx,id);
+    });
     return leadFormEmbedOrigin(form?.definition.embedOrigin,portableMode(process.env));
   }catch{return undefined;}
 }
@@ -126,12 +134,12 @@ export async function portableHealth(method:string,fingerprint:string){
 }
 
 async function checkDatabase(mode:'local'|'hosted',profile:'web'|'worker',
-  checks:{tasks:boolean;segments:boolean;gmail:boolean;workflowGmail:boolean;calendarInvites:boolean;calendarCancellations:boolean;calendarReschedules:boolean;personalGoogle:boolean;workspaceAccess:boolean}){
+  checks:{tasks:boolean;segments:boolean;gmail:boolean;workflowGmail:boolean;calendarInvites:boolean;calendarCancellations:boolean;calendarReschedules:boolean;personalGoogle:boolean;workspaceAccess:boolean;directoryGroups:boolean;samlGroups:boolean;oidcGroups:boolean}){
   let url:URL;
   try{url=portableDatabaseUrl(process.env,mode);}
   catch{return 'invalid_database_url';}
   try{
-    return await readPortableDatabaseStatus(url,async db=>{
+    return await readPortableDatabaseTransaction(url,async db=>{
       const status=await schemaState(db);
       if(status!=='ok')return status;
       const [{readOnly,canWrite,canCreateTasks,canScanSegments,canSaveGmail,canSaveCalendar,canUsePersonalGoogle,canManageWorkspaceAccess}]=await db<{
@@ -140,7 +148,11 @@ async function checkDatabase(mode:'local'|'hosted',profile:'web'|'worker',
       }[]>`
         SELECT current_setting('transaction_read_only')='on' AS "readOnly",
           has_schema_privilege('public','USAGE') AND
+          has_table_privilege('public.portable_workflow_path_steps','SELECT') AND
+          has_table_privilege('public.portable_workflow_path_receipts','SELECT') AND
+          has_table_privilege('public.portable_workflow_path_receipts','INSERT') AND
           CASE WHEN ${profile==='web'} THEN
+            has_table_privilege('public.portable_workflow_path_steps','INSERT') AND
             has_table_privilege('public.contacts','UPDATE') AND
             has_table_privilege('public.login_sessions','DELETE') AND
             has_any_column_privilege('public.login_sessions','UPDATE') AND
@@ -154,8 +166,8 @@ async function checkDatabase(mode:'local'|'hosted',profile:'web'|'worker',
                 ('public.portable_request_budgets','UPDATE', ARRAY['minute','used']),
                 ('public.portable_login_attempt_uses','SELECT', ARRAY['state_hash','expires_minute']),
                 ('public.portable_login_attempt_uses','INSERT', ARRAY['state_hash','expires_minute']),
-                ('public.login_identities','SELECT', ARRAY['id','google_subject','microsoft_subject','email','full_name']),
-                ('public.login_identities','INSERT', ARRAY['id','google_subject','microsoft_subject','email','full_name','created_at','updated_at']),
+                ('public.login_identities','SELECT', ARRAY['id','google_subject','microsoft_subject','oidc_subject','saml_subject','saml_directory_issuer','oidc_directory_issuer','directory_authority','email','full_name']),
+                ('public.login_identities','INSERT', ARRAY['id','google_subject','microsoft_subject','oidc_subject','saml_subject','saml_directory_issuer','oidc_directory_issuer','directory_authority','email','full_name','created_at','updated_at']),
                 ('public.login_identities','UPDATE', ARRAY['email','full_name','updated_at']),
                 ('public.login_sessions','SELECT', ARRAY['token_hash','user_id','expires_at']),
                 ('public.login_sessions','INSERT', ARRAY['token_hash','user_id','created_at','expires_at'])
@@ -180,8 +192,16 @@ async function checkDatabase(mode:'local'|'hosted',profile:'web'|'worker',
             has_table_privilege('public.portable_lead_form_activations','SELECT') AND
             has_table_privilege('public.portable_manual_workflow_run_actions','SELECT') AND
             has_column_privilege('public.portable_manual_workflow_run_actions','job_id','UPDATE') AND
+            -- Completing even a Note can enqueue a Task or webhook for a capable worker.
+            has_column_privilege('public.portable_workflow_path_steps','job_id','UPDATE') AND
+            has_table_privilege('public.portable_task_jobs','INSERT') AND
+            has_table_privilege('public.portable_workflow_webhook_jobs','INSERT') AND
+            -- Verifying a webhook successor locks the workflow revision FOR SHARE.
+            has_any_column_privilege('public.portable_deal_workflows','UPDATE') AND
             NOT EXISTS (
               SELECT FROM (VALUES
+                ('public.portable_deal_workflows', ARRAY['workspace_id','id','revision']),
+                ('public.portable_workflow_activations', ARRAY['workspace_id','workflow_id']),
                 ('public.portable_job_attempts', ARRAY['workspace_id','job_id','number']),
                 ('public.contact_events', ARRAY['workspace_id','contact_id','revision','previous','data']),
                 ('public.portable_lead_inquiries', ARRAY['workspace_id','form_id','id','contact_id','status'])
@@ -213,8 +233,7 @@ async function checkDatabase(mode:'local'|'hosted',profile:'web'|'worker',
             has_table_privilege('public.portable_manual_workflow_runs','SELECT') AND
             has_table_privilege('public.portable_workflow_activations','SELECT') AND
             has_table_privilege('public.portable_deal_workflows','SELECT') AND
-            has_table_privilege('public.portable_segments','SELECT') AND
-            (NOT ${checks.tasks} OR has_table_privilege('public.portable_task_jobs','INSERT'))
+            has_table_privilege('public.portable_segments','SELECT')
           ELSE true END AS "canScanSegments",
           CASE WHEN ${checks.gmail} THEN
             has_table_privilege('public.portable_scheduled_gmail','SELECT') AND
@@ -271,25 +290,58 @@ async function checkDatabase(mode:'local'|'hosted',profile:'web'|'worker',
           CASE WHEN ${checks.workspaceAccess} THEN
             has_table_privilege('public.portable_workspace_invites','DELETE') AND
             has_table_privilege('public.portable_workspace_viewers','DELETE') AND
+            has_table_privilege('public.portable_directory_users','DELETE') AND
+            has_table_privilege('public.portable_workspace_teams','DELETE') AND
             has_any_column_privilege('public.private_workspaces','UPDATE') AND
             NOT EXISTS (
               SELECT FROM (VALUES
                 ('public.private_workspaces', ARRAY['SELECT'], ARRAY['id','owner_id']),
                 -- Drizzle includes schema-managed DEFAULT columns in the INSERT column list.
-                ('public.private_workspaces', ARRAY['INSERT'], ARRAY['id','owner_id','last_job_claim_at','last_task_repeat_at','last_form_note_promotion_at']),
-                ('public.portable_workspace_invites', ARRAY['SELECT','INSERT'], ARRAY['id','workspace_id','email','role','expires_at']),
+                ('public.private_workspaces', ARRAY['INSERT'], ARRAY['id','owner_id','last_sales_sequence_at','last_job_claim_at','last_task_repeat_at','last_form_note_promotion_at','last_lead_routing_at']),
+                ('public.portable_workspace_invites', ARRAY['SELECT','INSERT'], ARRAY['id','workspace_id','email','role','expires_at','view_scope','edit_scope']),
                 ('public.portable_workspace_invites', ARRAY['UPDATE'], ARRAY['id','role']),
+                ('public.portable_custom_properties', ARRAY['SELECT'], ARRAY['workspace_id','visible_team_id']),
+                ('public.portable_standard_property_access', ARRAY['SELECT','INSERT'], ARRAY['workspace_id','kind','id','restricted','visible_team_id','revision']),
+                ('public.portable_standard_property_access', ARRAY['UPDATE'], ARRAY['restricted','visible_team_id','revision']),
+                ('public.portable_directory_groups', ARRAY['SELECT'], ARRAY['workspace_id','team_id']),
+                ('public.portable_directory_group_members', ARRAY['SELECT'], ARRAY['workspace_id','user_id','group_id']),
+                ('public.portable_directory_users', ARRAY['SELECT','INSERT'], ARRAY['id','workspace_id','user_id','saml_issuer','oidc_issuer','saml_external_id','display_name']),
+                ('public.portable_workspace_teams', ARRAY['SELECT','INSERT'], ARRAY['workspace_id','id','name','name_key','parent_id','revision']),
+                ('public.portable_workspace_teams', ARRAY['UPDATE'], ARRAY['name','name_key','parent_id','revision']),
                 ('public.portable_workspace_viewers', ARRAY['SELECT','INSERT'], ARRAY[
-                  'workspace_id','viewer_id','id','role','contact_files','scheduled_notes','contact_outreach','record_activities'
+                  'workspace_id','viewer_id','id','role','contact_files','scheduled_notes','contact_outreach','record_activities','backup_admin','team_id','view_scope','edit_scope'
                 ]),
                 ('public.portable_workspace_viewers', ARRAY['UPDATE'], ARRAY[
-                  'id','role','contact_files','scheduled_notes','contact_outreach','record_activities'
+                  'id','role','contact_files','scheduled_notes','contact_outreach','record_activities','backup_admin','team_id','view_scope','edit_scope'
                 ])
               ) AS workspace_access(relation_name,permissions,column_names)
               CROSS JOIN LATERAL unnest(workspace_access.permissions) AS required_permission(name)
               CROSS JOIN LATERAL unnest(workspace_access.column_names) AS required_column(name)
               WHERE NOT has_column_privilege(workspace_access.relation_name,required_column.name,required_permission.name)
             )
+            AND (NOT ${checks.directoryGroups||checks.samlGroups||checks.oidcGroups} OR (
+              has_table_privilege('public.portable_directory_groups','DELETE') AND
+              has_table_privilege('public.portable_directory_group_members','DELETE') AND
+              -- lockDirectory uses SELECT FOR SHARE on the scoped token while processing a request.
+              has_any_column_privilege('public.portable_api_tokens','UPDATE') AND
+              NOT EXISTS (
+                SELECT FROM (VALUES
+                  ('public.portable_directory_users', ARRAY['UPDATE'], ARRAY['display_name']),
+                  ('public.portable_directory_groups', ARRAY['SELECT','INSERT'], ARRAY['workspace_id','team_id']),
+                  ('public.portable_directory_groups', ARRAY['SELECT','UPDATE'], ARRAY['group_id','display_name']),
+                  ('public.portable_directory_groups', ARRAY['SELECT','INSERT'], CASE WHEN ${checks.directoryGroups} THEN ARRAY['tenant','external_id'] END),
+                  ('public.portable_directory_groups', ARRAY['SELECT','INSERT'], CASE WHEN ${checks.samlGroups} THEN ARRAY['saml_issuer'] END),
+                  ('public.portable_directory_groups', ARRAY['SELECT','INSERT'], CASE WHEN ${checks.oidcGroups} THEN ARRAY['oidc_issuer'] END),
+                  ('public.portable_directory_groups', ARRAY['SELECT','INSERT'], CASE WHEN ${checks.samlGroups||checks.oidcGroups} THEN ARRAY['saml_group_name'] END),
+                  ('public.portable_directory_groups', ARRAY['SELECT','UPDATE'], CASE WHEN ${checks.samlGroups||checks.oidcGroups} THEN ARRAY['saml_external_id'] END),
+                  ('public.portable_directory_group_members', ARRAY['INSERT'], ARRAY['workspace_id','user_id','group_id']),
+                  ('public.portable_api_tokens', ARRAY['SELECT'], ARRAY['workspace_id','issuer_id','id','token_hash','expires_at','revoked_at','scopes'])
+                ) AS directory_access(relation_name,permissions,column_names)
+                CROSS JOIN LATERAL unnest(directory_access.permissions) AS operation(name)
+                CROSS JOIN LATERAL unnest(directory_access.column_names) AS required(name)
+                WHERE NOT has_column_privilege(directory_access.relation_name,required.name,operation.name)
+              )
+            ))
           ELSE true END AS "canManageWorkspaceAccess"`;
       if(readOnly)return 'database_read_only';
       if(!canWrite)return 'missing_runtime_permissions';
@@ -358,16 +410,18 @@ async function checkCalendarConnection(config:ReturnType<typeof portableCalendar
 }
 
 export async function portableDoctor(profile:'web'|'worker',
-  {beforeGoogle=false,checkGoogle=false,checkGmail=false,checkInbox=false,checkCalendar=false,checkTasks=false,checkSegments=false,checkWorkspaceAccess=false,privateFile,expectedWebOrigin}:
-  {beforeGoogle?:boolean;checkGoogle?:boolean;checkGmail?:boolean;checkInbox?:boolean;checkCalendar?:boolean;checkTasks?:boolean;checkSegments?:boolean;checkWorkspaceAccess?:boolean;privateFile?:string;expectedWebOrigin?:string}={}){
+  {beforeGoogle=false,checkGoogle=false,checkGmail=false,checkInbox=false,checkCalendar=false,checkTasks=false,checkSegments=false,checkWorkspaceAccess=false,samlMetadataFile,privateFile,expectedWebOrigin}:
+  {beforeGoogle?:boolean;checkGoogle?:boolean;checkGmail?:boolean;checkInbox?:boolean;checkCalendar?:boolean;checkTasks?:boolean;checkSegments?:boolean;checkWorkspaceAccess?:boolean;samlMetadataFile?:string;privateFile?:string;expectedWebOrigin?:string}={}){
   const checks:Record<string,string>={};
   let mode:'local'|'hosted';
   try{mode=portableMode(process.env);}
   catch{return {profile,result:'needs_setup',checks:{mode:'invalid_mode'}};}
   const web=profile==='web';
-  let login:ReturnType<typeof loginConfig>|undefined;
+  let login:{allowedEmails:string[]}|undefined;
   let webOrigin:string|undefined;
-  let googleCallbackUrl:string|undefined,microsoftCallbackUrl:string|undefined;
+  let oidcCallbackUrl:string|undefined,googleCallbackUrl:string|undefined,microsoftCallbackUrl:string|undefined,samlCallbackUrl:string|undefined,samlMetadataUrl:string|undefined;
+  let metadataComparison:Awaited<ReturnType<typeof checkSamlMetadataFile>>|undefined;
+  let samlSigningCertificates:{sha256:string;expiresAt:string}[]|undefined;
   let signInSettingsToCheck:string[]|undefined;
   if(web){
     try{
@@ -379,27 +433,53 @@ export async function portableDoctor(profile:'web'|'worker',
     catch{checks.webOrigin='invalid_origin_or_port';}
     const {missing,invalidCredentials,invalidAllowlist}=googleLoginSetupIssues(env);
     const providers=portableLoginProviders(),hasMicrosoft=microsoftLoginSettings.some(key=>!!env[key]);
+    if(env.HARBOR_DIRECTORY_AUTHORITY_WORKSPACE_ID||env.HARBOR_DIRECTORY_EMAIL_DOMAIN){
+      checks.microsoftDirectoryAuthority=directoryAuthority()&&portableDirectoryConfig()?'ok':'invalid_microsoft_directory_authority';
+    }
+    if(env.HARBOR_OIDC_DIRECTORY_AUTHORITY_WORKSPACE_ID||env.HARBOR_OIDC_DIRECTORY_EMAIL_DOMAIN){
+      checks.oidcDirectoryAuthority=oidcDirectoryAuthority()&&portableOidcDirectoryConfig()?'ok':'invalid_oidc_directory_authority';
+    }
+    if(process.env.HARBOR_SAML_DIRECTORY_AUTHORITY_WORKSPACE_ID||process.env.HARBOR_SAML_DIRECTORY_EMAIL_DOMAIN){
+      checks.samlDirectoryAuthority=samlDirectoryAuthority()&&portableSamlDirectoryConfig()?'ok':'invalid_saml_directory_authority';
+    }
     const hasGoogle=!!(env.HARBOR_LOGIN_GOOGLE_CLIENT_ID||env.HARBOR_LOGIN_GOOGLE_CLIENT_SECRET);
     if(hasMicrosoft){
       checks.microsoftSignIn=providers.microsoft?'ok':'invalid_sign_in_settings';
       if(webOrigin)microsoftCallbackUrl=webOrigin+microsoftCallbackPath;
     }
-    const awaitingGoogle=beforeGoogle&&!hasMicrosoft&&!invalidAllowlist&&
+    const hasOidc=oidcSettings.some(key=>!!env[key]);
+    if(hasOidc){
+      checks.oidcSignIn=providers.oidc?'ok':'invalid_sign_in_settings';
+      if(webOrigin)oidcCallbackUrl=webOrigin+oidcCallbackPath;
+    }
+    const hasSaml=samlLoginSettings.some(key=>!!env[key]);
+    if(hasSaml){
+      checks.samlSignIn=providers.saml?'ok':'invalid_sign_in_settings';
+      samlSigningCertificates=providers.saml?.certificates.map(cert=>({sha256:cert.fingerprint256,expiresAt:cert.validToDate.toISOString()}));
+      if(webOrigin){
+        samlCallbackUrl=webOrigin+samlCallbackPath;
+        samlMetadataUrl=webOrigin+samlMetadataPath;
+      }
+    }
+    if(samlMetadataFile!==undefined){
+      metadataComparison=await checkSamlMetadataFile(samlMetadataFile,providers.saml);
+      checks.samlMetadata=metadataComparison.status;
+    }
+    login=providers.google??providers.microsoft??providers.saml??providers.oidc;
+    const awaitingGoogle=beforeGoogle&&!hasMicrosoft&&!hasSaml&&!hasOidc&&!invalidAllowlist&&
       missing.includes('HARBOR_LOGIN_GOOGLE_CLIENT_ID')&&missing.includes('HARBOR_LOGIN_GOOGLE_CLIENT_SECRET');
-    if(hasMicrosoft&&!hasGoogle){
+    if((hasMicrosoft||hasSaml||hasOidc)&&!hasGoogle){
       checks.googleSignIn='disabled';
-      login=providers.microsoft;
       googleCallbackUrl=undefined;
     }else if(awaitingGoogle){
       checks.googleSignIn='pending_setup';
+    }else if(providers.google){
+      checks.googleSignIn='ok';
     }else{
-      try{login=loginConfig(env);checks.googleSignIn='ok';}
-      catch{
-        checks.googleSignIn='invalid_sign_in_settings';
-        const settingsToCheck=[...missing,...invalidCredentials];
-        if(invalidAllowlist)settingsToCheck.push('HARBOR_LOGIN_ALLOWED_EMAILS');
-        if(settingsToCheck.length)signInSettingsToCheck=settingsToCheck;
-      }
+      checks.googleSignIn='invalid_sign_in_settings';
+      const settingsToCheck=[...missing,...invalidCredentials];
+      if(invalidAllowlist)settingsToCheck.push('HARBOR_LOGIN_ALLOWED_EMAILS');
+      if(settingsToCheck.length)signInSettingsToCheck=settingsToCheck;
     }
   }
   const outlookEnabled=web&&process.env.HARBOR_PORTABLE_OUTLOOK_ENABLED==='true';
@@ -462,7 +542,9 @@ export async function portableDoctor(profile:'web'|'worker',
     calendarCancellations:checks.calendarCancellations==='ok',
     calendarReschedules:checks.calendarReschedules==='ok',
     personalGoogle:Boolean(outlook)||personalGoogle?.gmail==='ok'||personalGoogle?.calendar==='ok',
-    workspaceAccess:web&&checkWorkspaceAccess,
+    workspaceAccess:web&&checkWorkspaceAccess,directoryGroups:web&&checkWorkspaceAccess&&Boolean(portableDirectoryConfig()),
+    oidcGroups:web&&checkWorkspaceAccess&&Boolean(portableOidcDirectoryConfig()),
+    samlGroups:web&&checkWorkspaceAccess&&Boolean(portableSamlDirectoryConfig()),
   };
   const [database,storage,google,filePrivacy,gmailConnection,inboxConnection,calendarConnection]=await Promise.all([
     checkDatabase(mode,profile,databaseChecks),storageStatus,web&&checkGoogle?googleReachability():undefined,
@@ -484,6 +566,6 @@ export async function portableDoctor(profile:'web'|'worker',
   const result=!ready?'needs_setup':checks.googleSignIn==='pending_setup'?'ready_for_google_setup':'ready';
   return {profile,mode,result,
     ...(web?{}:{workerEnabled:mode==='local'||process.env.HARBOR_PORTABLE_WORKER_ENABLED==='true'}),
-    ...(googleCallbackUrl?{googleCallbackUrl}:{}),...(microsoftCallbackUrl?{microsoftCallbackUrl}:{}),...(personalGoogleCallbackUrls?{personalGoogleCallbackUrls}:{}),
-    ...(signInSettingsToCheck?{signInSettingsToCheck}:{}),checks};
+    ...(oidcCallbackUrl?{oidcCallbackUrl}:{}),...(googleCallbackUrl?{googleCallbackUrl}:{}),...(microsoftCallbackUrl?{microsoftCallbackUrl}:{}),...(personalGoogleCallbackUrls?{personalGoogleCallbackUrls}:{}),
+    ...(metadataComparison?{samlMetadataComparison:metadataComparison}:{}),...(samlCallbackUrl?{samlCallbackUrl,samlMetadataUrl}:{}),...(samlSigningCertificates?{samlSigningCertificates}:{}),...(signInSettingsToCheck?{signInSettingsToCheck}:{}),checks};
 }

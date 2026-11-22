@@ -1,3 +1,5 @@
+import {sharedToolAllowed} from './shared-tool-permission';
+import {requireMergeFieldAccess} from './record-property-access';
 import {and,count,eq,inArray} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {ApiError} from '../../lib/api-error';
@@ -58,8 +60,9 @@ const endpointOf=(id:string)=>mergeEndpointOf('companies',id);
 
 export function previewPortableCompanyMerge(db:Db,actorId:string,input:{primaryId:string;secondaryId:string},shared?:SharedRecordWriteScope):Promise<PortableMergePreview>{
   return db.transaction(async tx=>{
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,'recordActivities');
-    if(!workspaceId)throw shared?new ApiError(403,'Merging companies requires editor access with record activities enabled.'):new ApiError(404,notFound);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,'recordActivities',!!shared);
+    if(!workspaceId||!await sharedToolAllowed(tx,actorId,shared?.workspaceId,'duplicates','edit'))throw shared?new ApiError(403,'Merging companies requires editor access with record activities enabled.'):new ApiError(404,notFound);
+    if(shared)await requireMergeFieldAccess(tx,workspaceId,'companies',actorId);
     const {primary,secondary}=await pair(tx,workspaceId,input.primaryId,input.secondaryId,false);
     const fields=await mergeFields(tx,workspaceId);
     const view=(row:typeof primary)=>({id:row.id,revision:row.revision,data:row.data,createdAt:isoTime(row.createdAt)});
@@ -76,7 +79,8 @@ export function mergePortableCompanies(db:Db,actorId:string,input:MergeInput,sha
   return db.transaction(async tx=>{
     // Serializes with every record writer, so no new link to the secondary can commit.
     const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,'recordActivities',true);
-    if(!workspaceId)throw shared?new ApiError(403,'Merging companies requires editor access with record activities enabled.'):new ApiError(404,notFound);
+    if(!workspaceId||!await sharedToolAllowed(tx,actorId,shared?.workspaceId,'duplicates','edit'))throw shared?new ApiError(403,'Merging companies requires editor access with record activities enabled.'):new ApiError(404,notFound);
+    if(shared)await requireMergeFieldAccess(tx,workspaceId,'companies',actorId);
     const {primaryId,secondaryId,requestId}=input;
     const [previous]=await tx.select().from(receipts).where(and(eq(receipts.workspaceId,workspaceId),eq(receipts.requestId,requestId)));
     if(previous){
@@ -141,7 +145,7 @@ async function moveCompanyLinks(tx:Tx,workspaceId:string,actorId:string,primaryI
     .where(and(eq(portableTickets.workspaceId,workspaceId),eq(portableTickets.companyId,secondaryId))).for('update');
   for(const row of ticketRows){
     const revision=row.revision+1;
-    const snapshot=(companyId:string)=>({data:row.data,contactId:row.contactId,companyId,closedAt:row.closedAt&&isoTime(row.closedAt)});
+    const snapshot=(companyId:string)=>({assigneeId:row.assigneeId,assigneeLabel:row.assigneeLabel,data:row.data,contactId:row.contactId,companyId,closedAt:row.closedAt&&isoTime(row.closedAt)});
     await tx.update(portableTickets).set({companyId:primaryId,revision,updatedAt:now})
       .where(and(eq(portableTickets.workspaceId,workspaceId),eq(portableTickets.id,row.id)));
     await tx.insert(portableTicketEvents).values({workspaceId,ticketId:row.id,revision,actorId,

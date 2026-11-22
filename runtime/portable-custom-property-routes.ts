@@ -1,4 +1,6 @@
 import {listPortableCustomProperties,savePortableCustomProperty} from '../db/postgres/custom-property-store';
+import {listPortableStandardAccess,savePortableStandardAccess} from '../db/postgres/standard-property-access';
+import {portableStandardAccessWrite} from '../lib/portable-standard-property-access';
 import {sharedWorkspaceGrant} from '../db/postgres/workspace-viewer-store';
 import {ApiError} from '../lib/api-error';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
@@ -17,8 +19,12 @@ async function propertiesRoute(request:Request){
       const query=portableCustomPropertyRead.safeParse(Object.fromEntries(params));
       if(!query.success||params.size!==new Set(params.keys()).size)return json({error:'Invalid custom property query.'},400);
       const {kind,workspaceId}=query.data;
-      if(workspaceId&&!await sharedWorkspaceGrant(db,user.userId,workspaceId))return json({error:'Shared workspace unavailable.'},404);
-      return json({properties:await listPortableCustomProperties(db,user.userId,kind,workspaceId)});
+      if(workspaceId&&!await sharedWorkspaceGrant(db,user.userId,workspaceId,true))return json({error:'Shared workspace unavailable.'},404);
+      const [properties,standardAccess]=await Promise.all([
+        listPortableCustomProperties(db,user.userId,kind,workspaceId),
+        listPortableStandardAccess(db,user.userId,kind,workspaceId),
+      ]);
+      return json({properties,standardAccess});
     }
     if(user.guest||params.size)return json({error:'Manage properties in your own workspace.'},403);
     let body:unknown;
@@ -26,6 +32,8 @@ async function propertiesRoute(request:Request){
       const text=await readBoundedRequestText(request,32_000);
       if(text!==null)body=JSON.parse(text);
     }catch{}
+    const access=portableStandardAccessWrite.safeParse(body);
+    if(access.success)return json({property:await savePortableStandardAccess(db,user.userId,access.data)});
     const input=portableCustomPropertyWrite.safeParse(body);
     if(!input.success)return json({error:'Check the custom property definition.'},400);
     const property=await savePortableCustomProperty(db,user.userId,input.data);

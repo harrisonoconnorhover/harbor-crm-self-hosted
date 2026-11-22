@@ -1,0 +1,1 @@
+CREATE INDEX "sales_enrollment_state_history" ON "portable_sales_enrollments" USING btree ("workspace_id","state","created_at","id");

@@ -1,0 +1,2 @@
+CREATE INDEX "portable_contact_call_summary_search" ON "portable_contact_activities" USING gin (to_tsvector('simple'::regconfig, "summary")) WHERE "portable_contact_activities"."kind" = 'Call';--> statement-breakpoint
+CREATE INDEX "portable_record_call_summary_search" ON "portable_record_activities" USING gin (to_tsvector('simple'::regconfig, "summary")) WHERE "portable_record_activities"."kind" = 'Call';

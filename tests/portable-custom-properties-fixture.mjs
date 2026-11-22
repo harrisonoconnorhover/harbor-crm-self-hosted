@@ -161,7 +161,10 @@ export async function verifyPortableCustomProperties({request,origin,headers,oth
 
     const homepage=await (await request('/',{headers})).text();
     assert.match(homepage,/Manage properties/);
-    for(const label of ['Multi-line text','URL','Email','Date and time','Multi-select'])assert.ok(homepage.includes(label));
+    const settings=await request('/?view=settings&section=properties&kind=contacts',{headers});
+    assert.equal(settings.status,200);
+    const editorHtml=await settings.text();
+    for(const label of ['Multi-line text','URL','Email','Date and time','Multi-select'])assert.ok(editorHtml.includes(label));
     const contactPage=await (await request('/?contact='+contact.id,{headers})).text();
     assert.match(contactPage,/Edit all properties/);
     assert.doesNotMatch(contactPage,/<form class="portable-record-editor"/);

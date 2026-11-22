@@ -47,7 +47,11 @@ export function createOidcIdentityRoutes(enabled:()=>boolean,configure:()=>{orig
      return redirect(retry.href,[clear]);
    }
  }
- async function logout(request:Request){
+ return {startLogin,completeLogin,logout:createLogoutRoute(enabled,configure,revokeLogin)};
+}
+
+export function createLogoutRoute(enabled:()=>boolean,configure:()=>{origin:string;secure:boolean},revokeLogin:(headers:Headers,allDevices:boolean)=>Promise<void>){
+ return async function logout(request:Request){
    if(!enabled())return new Response('Not found',{status:404});
    const config=configure();
    if(request.headers.get('origin')!==config.origin||new URL(request.url).origin!==config.origin)return new Response('Submit this action from Harbor.',{status:403,headers});
@@ -61,6 +65,5 @@ export function createOidcIdentityRoutes(enabled:()=>boolean,configure:()=>{orig
    if(scopes.length!==1||scope!=='all'&&scope!=='current')return new Response('Choose which sessions to end.',{status:400,headers});
    await revokeLogin(request.headers,scope==='all');
    return redirect(config.origin+'/auth/sign-in?signed_out=1',[authCookie('session','',config.secure,0),authCookie('attempt','',config.secure,0)]);
- }
- return {startLogin,completeLogin,logout};
+ };
 }

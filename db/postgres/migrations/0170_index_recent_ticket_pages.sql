@@ -1,0 +1,1 @@
+CREATE INDEX "portable_tickets_recent_page" ON "portable_tickets" USING btree ("workspace_id",date_trunc('milliseconds',"updated_at" AT TIME ZONE 'UTC'),"id") WHERE "portable_tickets"."archived_at" IS NULL;

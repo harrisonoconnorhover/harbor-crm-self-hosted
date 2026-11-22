@@ -362,7 +362,9 @@ export async function verifyPortableSharedFiles({request,origin,headers,other,re
   assert.equal(sharedContact.status,200);
   const sharedContactMarkup=await sharedContact.text();
   assert.match(sharedContactMarkup,/<h2>Contact files<\/h2>/);
-  assert.doesNotMatch(sharedContactMarkup,/>View in Files library<\/a>/);
+  const library='/?'+new URLSearchParams({view:'files',contactId:record.id,workspaceId});
+  assert.deepEqual([...sharedContactMarkup.matchAll(/href="([^"]+)">View in Files library<\/a>/g)].map(match=>match[1].replaceAll('&amp;','&')),[library]);
+  assert.equal((await list(library,other)).status,200);
   assert.equal((await upload(activeEditor.id,fileId,versionId)).status,403);
   assert.equal((await upload(editor.id,fileId,versionId)).status,200);
   assert.equal((await upload(editor.id,fileId,versionId)).status,200);
@@ -387,22 +389,22 @@ export async function verifyPortableSharedFiles({request,origin,headers,other,re
   const racingEditor=await update('role',viewer.id,{role:'editor'});
   const interruptedVersion=randomUUID();
   let pendingUpload,pendingRevoke;
-  async function waitForLock(fragment){
+  async function waitForLock(blocker,fragment){
     for(let i=0;i<80;i++){
-      const [{waiting}]=await sql`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock'
-        AND query LIKE ${fragment}) AS waiting`;
-      if(waiting)return;
+      const [waiting]=await sql`SELECT pid FROM pg_stat_activity WHERE wait_event_type='Lock'
+        AND ${blocker}::int=ANY(pg_blocking_pids(pid)) AND query LIKE ${fragment}`;
+      if(waiting)return waiting.pid;
       await delay(25);
     }
     assert.fail('Expected a pending row lock for '+fragment);
   }
   await sql.begin(async tx=>{
     // Hold registration on the contact row while a revocation queues behind its grant lock.
-    await tx`SELECT id FROM contacts WHERE workspace_id=${workspaceId} AND id=${record.id} FOR UPDATE`;
+    const [{pid}]=await tx`SELECT pg_backend_pid() AS pid FROM contacts WHERE workspace_id=${workspaceId} AND id=${record.id} FOR UPDATE`;
     pendingUpload=upload(racingEditor.id,fileId,interruptedVersion,replacement);
-    await waitForLock('%from "contacts"%for update%');
+    const uploader=await waitForLock(pid,'%from "contacts"%');
     pendingRevoke=update('contact_files',racingEditor.id,{enabled:false});
-    await waitForLock('%update "portable_workspace_viewers"%');
+    await waitForLock(uploader,'%update "portable_workspace_viewers"%');
   });
   assert.equal((await pendingUpload).status,403);
   const disabled=await pendingRevoke;
@@ -418,12 +420,12 @@ export async function verifyPortableSharedFiles({request,origin,headers,other,re
   try{
     await sql.begin(async tx=>{
       // Registration takes the Contact lock first. Archive queues behind it and commits before publication.
-      await tx`SELECT id FROM contacts WHERE workspace_id=${workspaceId} AND id=${record.id} FOR UPDATE`;
+      const [{pid}]=await tx`SELECT pg_backend_pid() AS pid FROM contacts WHERE workspace_id=${workspaceId} AND id=${record.id} FOR UPDATE`;
       stagedUpload=upload(reenabled.id,fileId,archivedVersion,replacement);
-      await waitForLock('%from "contacts"%for update%');
+      const uploader=await waitForLock(pid,'%from "contacts"%');
       archive=sql`UPDATE /* fixture file archive */ contacts SET archived_at=now()
         WHERE workspace_id=${workspaceId} AND id=${record.id}`.execute();
-      await waitForLock('%UPDATE /* fixture file archive */ contacts%');
+      await waitForLock(uploader,'%UPDATE /* fixture file archive */ contacts%');
     });
     const [denied]=await Promise.all([stagedUpload,archive]);
     assert.equal(denied.status,404);

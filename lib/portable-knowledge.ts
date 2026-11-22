@@ -9,6 +9,7 @@ const cursor=z.object({
 }).strict();
 
 export const portableArticleList=z.object({
+  match:z.enum(['phrase','words']).optional(),
   status:z.enum(['draft','archived','all']).default('draft'),
   categoryId:id.optional(),
   q:z.string().trim().max(200).default(''),
@@ -41,6 +42,11 @@ export const portableKnowledgeCategoryMutation=z.discriminatedUnion('action',[
   z.object({action:z.literal('archive'),id,revision:categoryRevision.min(1),archived:z.boolean()}).strict(),
 ]);
 export type PortableKnowledgeCategoryMutation=z.output<typeof portableKnowledgeCategoryMutation>;
-export const portableKnowledgeCategoryQuery=z.object({status:z.enum(['active','archived']).default('active')}).strict();
+export const portableKnowledgeCategoryQuery=z.object({
+  status:z.enum(['active','archived']).default('active'),q:z.string().trim().max(100).optional(),
+  limit:z.coerce.number().int().min(1).max(200).default(200),topLevel:z.literal('1').optional(),
+  afterName:z.string().max(100).optional(),afterId:id.optional(),
+}).strict().refine(input=>(input.afterName===undefined)===(input.afterId===undefined));
+export type KnowledgeCategoryPage={items:PortableKnowledgeCategory[];next:{afterName:string;afterId:string}|null};
 export type PortableKnowledgeCategory={id:string;parentId:string|null;parentName:string|null;name:string;description:string;
   revision:number;updatedAt:number;archivedAt:number|null;articleCount:number;childCount:number};

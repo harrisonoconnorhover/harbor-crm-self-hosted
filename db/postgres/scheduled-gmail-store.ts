@@ -1,9 +1,11 @@
-import {and,eq,isNull} from 'drizzle-orm';
+import {sequenceRepCanEditContact} from './sales-sequence-access';
+import {and,eq,isNull,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {emailContent} from '../../lib/email/message';
 import {suppressedAddress} from '../../lib/email/suppression';
 import {insertEmailUnsubscribeToken,workspaceEmailBlocked} from './email-suppression-store';
 import {emailSuppressions as blocks} from './email-suppression-schema';
+import {salesSequenceExitSignal} from './sales-sequence-exit';
 import {contacts} from './contact-schema';
 import {activeContact} from './contact-visibility';
 import {loginIdentities} from './identity-schema';
@@ -118,6 +120,33 @@ export function beginGmailDispatch(db:Db,claim:Claim,sender:string,workflowGmail
     if(message.dispatchStartedAt!==null){
       await closeAttempt(tx,job,at,'attention','external_outcome_unknown');
       return null;
+    }
+    // A scheduled step retains its job link after a stop or restore. Only the active
+    // enrollment may dispatch it; an ordinary scheduled Gmail job has no such link.
+    const [sequence]=await tx.execute<{allowed:boolean;created_at:string;team_booking_id:string|null}>(sql`
+      SELECT e.created_at,a.team_booking_id,(s.state='queued' AND e.state='active' AND a.enrollment_id IS NOT NULL
+        AND e.contact_id=${job.contactId} AND e.actor_id=${job.actorId}
+        AND e.sender=${sender} AND e.recipient=${message.recipient}
+        AND (e.assignee_id=${job.actorId} OR ${sequenceRepCanEditContact(tx,sql`e.assignee_id`,sql`e.workspace_id`,sql`e.contact_id`)})) AS allowed
+      FROM portable_sales_sequence_steps s JOIN portable_sales_enrollments e
+        ON (e.workspace_id,e.id)=(s.workspace_id,s.enrollment_id)
+      LEFT JOIN portable_sales_sequence_activations a ON (a.workspace_id,a.enrollment_id)=(e.workspace_id,e.id)
+      WHERE s.workspace_id=${workspaceId} AND s.job_id=${job.id}`);
+    if(sequence&&!sequence.allowed){
+      await closeAttempt(tx,job,at,'skipped','sequence_enrollment_inactive');
+      return null;
+    }
+    if(sequence&&process.env.HARBOR_SEQUENCE_WORKER_ENABLED!=='true'){
+      await closeAttempt(tx,job,at,'queued','sequence_worker_off',at+1000);
+      return null;
+    }
+    if(sequence){
+      const exit=await salesSequenceExitSignal(tx,{teamBookingId:sequence.team_booking_id,workspaceId,contactId:job.contactId,actorId:job.actorId,
+        sender,recipient:message.recipient,createdAt:Number(sequence.created_at)});
+      if(exit){
+        await closeAttempt(tx,job,at,'skipped',exit);
+        return null;
+      }
     }
     if(at-job.scheduledFor>gmailSendGraceMs){
       await closeAttempt(tx,job,at,'failed','email_schedule_expired');

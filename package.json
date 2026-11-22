@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build:portable": "node scripts/build-portable.mjs",
+    "test:marketing:portable": "npm run build:portable && node tests/portable-fixtures/run.mjs --marketing",
     "test:portable": "npm run build:portable && node tests/portable-fixtures/run.mjs",
     "doctor:portable": "node scripts/portable-web.mjs doctor",
     "start:portable": "node scripts/portable-web.mjs start",
@@ -25,6 +26,9 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1164.0",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "@node-saml/node-saml": "5.2.0",
+    "@xmldom/xmldom": "0.8.15",
+    "aircall-everywhere": "2.0.6",
     "drizzle-orm": "0.45.2",
     "htmlparser2": "12.0.0",
     "jose": "6.2.14",
@@ -35,6 +39,7 @@
     "re2js": "2.9.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "stripe": "23.2.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

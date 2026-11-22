@@ -1,3 +1,6 @@
+import {effectiveMemberToolPolicy} from '../lib/portable-tool-permissions';
+import {portablePageHasBody} from './portable-page-body';
+import {recordWorkItemAccess} from '../db/postgres/record-access-store';
 import {withPortableNavigation} from './portable-navigation';
 import {notFound} from 'next/navigation';
 import {z} from 'zod';
@@ -27,22 +30,29 @@ export async function PortableLeadPage({search,stage,owner,after,record,add,work
   }
   const user=await requireChatGPTUser('/?'+params);
   const db=portableDb();
-  let grant:{id:string;role:'viewer'|'editor'}|undefined;
+  let grant:{id:string;role:'viewer'|'editor';restrictedEdit:boolean;canCreate:boolean;canDelete:boolean;canCreateDeal:boolean}|undefined;
   if(workspaceId){
     // Shared Leads follow the workspace grant: viewers read, editors also write.
     if(portableWorkspaceGuest(user.email)&&!await guestWorkspaceAllowed(db,user.userId,workspaceId,loginConfig(env).allowedEmails))notFound();
-    const current=await sharedWorkspaceGrant(db,user.userId,workspaceId);
+    const current=await sharedWorkspaceGrant(db,user.userId,workspaceId,true);
     if(!current)notFound();
-    grant={id:current.id,role:current.role};
-    if(add&&grant.role!=='editor')notFound();
+    const policy=effectiveMemberToolPolicy(current,'leads');
+    if(policy.view==='none')notFound();
+    grant={id:current.id,role:current.role,restrictedEdit:policy.edit!=='all',canCreate:policy.create,canDelete:policy.delete,canCreateDeal:effectiveMemberToolPolicy(current,'deals').create};
+    if(add&&!grant.canCreate)notFound();
   }else if(portableWorkspaceGuest(user.email))return <PortableGuestHome email={user.email}/>;
-  const [page,lead,assignees]=await Promise.all([
-    readPortableLeads(db,user.userId,query.data),
-    selected.data?readPortableLeads(db,user.userId,{id:selected.data,limit:1,workspaceId}):undefined,
-    // Viewers can't assign, so only editors and the owner load the member list.
-    (record||add)&&grant?.role!=='viewer'?portableWorkspaceAssignees(db,user.userId,workspaceId):[],
-  ]);
-  if(!page||!('records' in page)||selected.data&&(!lead||!('data' in lead)))notFound();
-  return withPortableNavigation(user.email,<PortableLeads key={record??(add?'add':'list')} email={user.email} query={query.data} page={page}
-    record={lead&&'data' in lead?lead:undefined} adding={add==='1'} grant={grant} assignees={assignees}/>);
+  const includeBody=await portablePageHasBody();
+  const {page,lead,assignees}=await db.transaction(async tx=>{
+    const [page,lead,assignees]=await Promise.all([
+      readPortableLeads(tx,user.userId,query.data),
+      selected.data?readPortableLeads(tx,user.userId,{id:selected.data,limit:1,workspaceId}):undefined,
+      // Viewers can't assign, so only editors and the owner load the member list.
+      (record||add)&&grant?.role!=='viewer'?portableWorkspaceAssignees(tx,user.userId,workspaceId,undefined,'leads'):[],
+    ]);
+    if(!page||!('records' in page)||selected.data&&(!lead||!('data' in lead)))notFound();
+    if(includeBody)await recordWorkItemAccess(tx,user,'leads',page,workspaceId,lead&&'data' in lead?lead:undefined);
+    return {page,lead,assignees};
+  },{isolationLevel:'repeatable read'});
+  return withPortableNavigation(user.email,<PortableLeads key={record??(add?'add':'list')} email={user.email} automaticRetries={process.env.HARBOR_LEAD_ROUTING_RETRY_ENABLED==='true'} query={query.data} page={page}
+    record={lead&&'data' in lead?lead:undefined} adding={add==='1'} grant={grant} assignees={assignees}/>,{actorId:user.userId,workspaceId});
 }

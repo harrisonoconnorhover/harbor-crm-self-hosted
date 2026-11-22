@@ -1,19 +1,27 @@
+import {ApiError} from '../../lib/api-error';
+import {recordUpdatedKey} from './record-updated-key';
+import {hiddenStandardFields} from './standard-property-access';
+import {listTokenCustomProperties} from './custom-property-store';
+import {portableExternalStandardFields} from '../../lib/portable-api-tokens';
+import {visibleRecordData} from './record-property-access';
 import {activeContact} from './contact-visibility';
 import {activeCompany} from './company-visibility';
 import {activeDeal} from './deal-visibility';
-import {and,asc,desc,eq,gt,inArray,isNotNull,sql,type SQL} from 'drizzle-orm';
+import {and,asc,desc,eq,gt,inArray,isNotNull,sql,type SQL,type SQLWrapper} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {outreachActivityTypes} from '../../lib/activity-date-policy';
 import {contacts,privateWorkspaces} from './contact-schema';
 import {companies} from './company-schema';
 import {deals} from './deal-schema';
-import type {PortableExternalRecordKind} from '../../lib/portable-api-tokens';
+import type {PortableRecordWindow,PortableExternalRecordKind} from '../../lib/portable-api-tokens';
 import {portableContactActivities as activities} from './portable-contact-activity-schema';
 import {leadInquiries as inquiries} from './lead-form-schema';
-import {portableLeads as leads} from './portable-lead-schema';
+import {activeLead,portableLeads as leads} from './portable-lead-schema';
 import {activeTask,portableTasks as tasks} from './task-schema';
-import {portableTickets as tickets} from './ticket-schema';
+import {activeTicket,portableTickets as tickets} from './ticket-schema';
+import {ownedRecordScope} from './record-ownership-scope';
 import {recordWorkspaceScope} from './workspace-viewer-store';
+import {recordDeletions} from './portable-api-token-schema';
 import {portableJobs as jobs} from './job-schema';
 import {scheduledGmail} from './scheduled-gmail-schema';
 import {confirmedScheduledGmailReceipt,scheduledGmailReceiptJoin} from './confirmed-scheduled-gmail';
@@ -22,21 +30,99 @@ const date=(value:number|null)=>value===null?null:new Date(value).toISOString();
 
 const privateExternalTables={tasks,leads,tickets};
 const externalTables={contacts,companies,deals,...privateExternalTables};
-const normalize=(row:{id:string;data:object;createdAt:string;updatedAt:string})=>({...row,
+const normalize=(row:{id:string;revision:number;data:object;createdAt:string;updatedAt:string})=>({...row,
   createdAt:new Date(row.createdAt).toISOString(),updatedAt:new Date(row.updatedAt).toISOString()});
 
 function externalSelection(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind){
   const table=externalTables[kind];
   // A record scope excludes assignees, queues and other linked records. Ticket owner is stored in the JSON.
-  const data=kind==='tickets'?sql<Omit<typeof tickets.$inferSelect.data,'owner'>>`${tickets.data} - 'owner'`:table.data;
-  const source=db.select({id:table.id,data,createdAt:table.createdAt,updatedAt:table.updatedAt}).from(table);
-  return {source,scope:and(eq(table.workspaceId,workspaceId),kind==='contacts'?activeContact:kind==='companies'?activeCompany:kind==='deals'?activeDeal:kind==='tasks'?activeTask:undefined),recordId:table.id};
+  const data=kind==='tickets'?sql<Omit<typeof tickets.$inferSelect.data,'owner'>>`${tickets.data} - 'owner'`:(kind==='deals'||kind==='contacts'||kind==='companies')?visibleRecordData(table.data,workspaceId,kind,null):table.data;
+  const source=db.select({id:table.id,revision:table.revision,data,createdAt:table.createdAt,updatedAt:table.updatedAt}).from(table);
+  return {source,scope:and(eq(table.workspaceId,workspaceId),kind==='contacts'?activeContact:kind==='companies'?activeCompany:kind==='deals'?activeDeal:kind==='tasks'?activeTask:kind==='leads'?activeLead:activeTicket),recordId:table.id};
+}
+
+export async function readExternalProperties(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind){
+  const standard=Object.keys(portableExternalStandardFields[kind]);
+  if(kind!=='contacts'&&kind!=='companies'&&kind!=='deals')return {object:kind,standardProperties:standard,customProperties:[]};
+  const hidden=new Set((await db.execute<{id:string}>(hiddenStandardFields(workspaceId,kind,null))).map(row=>row.id));
+  return {object:kind,standardProperties:standard.filter(key=>!hidden.has(key)),customProperties:await listTokenCustomProperties(db,workspaceId,kind)};
+}
+
+// Include archived IDs when guarding creation so a retry cannot resurrect a recycled record.
+export async function lockExternalRecord(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind,id:string){
+  const table=externalTables[kind];
+  const [row]=await db.select({revision:table.revision}).from(table)
+    .where(and(eq(table.workspaceId,workspaceId),eq(table.id,id))).for('update');
+  return row;
+}
+
+function recordWindowFilter(key:SQL,recordId:SQLWrapper,page:PortableRecordWindow){
+  const utc=(value:string)=>sql`(${value}::timestamptz AT TIME ZONE 'UTC')`;
+  return and(sql`${key}>=${utc(page.since)} AND ${key}<${utc(page.before)}`,
+    page.afterAt?sql`(${key},${recordId})>(${utc(page.afterAt)},${page.after}::uuid)`:undefined);
+}
+
+export async function readExternalDeletions(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind,page:PortableRecordWindow){
+  const {recordId,deletedAt}=recordDeletions;
+  const rows=await db.select({id:recordId,deletedAt}).from(recordDeletions)
+    .where(and(eq(recordDeletions.workspaceId,workspaceId),eq(recordDeletions.objectKind,kind),
+      recordWindowFilter(sql`${deletedAt}`,recordId,page)))
+    .orderBy(asc(deletedAt),asc(recordId)).limit(page.limit+1);
+  const results=rows.slice(0,page.limit).map(row=>({id:row.id,object:kind,deletedAt:row.deletedAt.toISOString()})),last=results.at(-1);
+  return {results,next:rows.length>page.limit&&last?{after:last.id,afterDeletedAt:last.deletedAt}:null};
+}
+
+export async function readExternalArchives(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind,
+  {id,after,limit,ids,window}:{id?:string;after?:string;limit:number;ids?:string[];window?:PortableRecordWindow}){
+  const table=externalTables[kind];
+  const key=recordUpdatedKey(table.archivedAt);
+  const rows=await db.select({id:table.id,archivedAt:table.archivedAt}).from(table)
+    .where(and(eq(table.workspaceId,workspaceId),isNotNull(table.archivedAt),
+      id?eq(table.id,id):undefined,ids?inArray(table.id,ids):undefined,window?recordWindowFilter(key,table.id,window):after?gt(table.id,after):undefined))
+    .orderBy(...(window?[asc(key),asc(table.id)]:[asc(table.id)])).limit(id?1:limit+1);
+  const results=rows.slice(0,limit).map(row=>({id:row.id,object:kind,archivedAt:new Date(row.archivedAt!).toISOString()}));
+  const last=results.at(-1);
+  return {results,next:rows.length>limit&&last?{after:last.id,...window&&{afterArchivedAt:last.archivedAt}}:null};
+}
+
+export async function matchExternalIdentifiers(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind,
+  property:'email'|'domain'|`custom:${string}`,values:string[]){
+  const table=externalTables[kind];
+  let matchesValue:SQL;
+  if(property==='email'||property==='domain'){
+    const key=property==='email'?sql`lower(r.data->>'email')`:sql`lower(r.data->>'domain')`;
+    matchesValue=sql`${key}=lower(v.identifier)`;
+  }else{
+    const fieldId=property.slice(7);
+    const fields=kind==='contacts'||kind==='companies'||kind==='deals'?await listTokenCustomProperties(db,workspaceId,kind):[];
+    if(!fields.some(field=>field.id===fieldId&&field.type==='text'))
+      throw new ApiError(400,'Choose a readable single-line text property for identifier lookup.');
+    matchesValue=sql`(r.data->'custom') IS NOT NULL AND (r.data->'custom') @> jsonb_build_object(${fieldId}::text,v.identifier)`;
+  }
+  // Two hits are enough to distinguish an ambiguous key, even on a heavily duplicated import.
+  const rows=await db.execute<{identifier:string;id:string}>(sql`
+    SELECT v.identifier, hit.id FROM (VALUES ${sql.join(values.map(value=>sql`(${value}::text)`),sql`,`)}) v(identifier)
+    CROSS JOIN LATERAL (SELECT r.id FROM ${table} r WHERE r.workspace_id=${workspaceId} AND r.archived_at IS NULL
+      AND ${matchesValue} LIMIT 2) hit`);
+  const matches=new Map<string,string|null>();
+  for(const row of rows)matches.set(row.identifier,matches.has(row.identifier)?null:row.id);
+  return matches;
 }
 
 export async function readExternalRecordBatch(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind,ids:string[]){
   const {source,scope,recordId}=externalSelection(db,workspaceId,kind);
   const rows=await source.where(and(scope,inArray(recordId,ids)));
   return Object.hasOwn(privateExternalTables,kind)?rows.map(normalize):rows;
+}
+
+export async function readExternalUpdatedRecords(db:PostgresJsDatabase,workspaceId:string,kind:PortableExternalRecordKind,page:PortableRecordWindow){
+  const {source,scope,recordId}=externalSelection(db,workspaceId,kind);
+  const key=recordUpdatedKey(externalTables[kind].updatedAt);
+  const rows=await source.where(and(scope,recordWindowFilter(key,recordId,page)))
+    .orderBy(asc(key),asc(recordId)).limit(page.limit+1);
+  const items=rows.slice(0,page.limit),last=items.at(-1);
+  return {records:Object.hasOwn(privateExternalTables,kind)?items.map(normalize):items,
+    next:rows.length>page.limit&&last?{after:last.id,afterUpdatedAt:new Date(last.updatedAt).toISOString()}:null};
 }
 
 export async function readExternalPrivateRecords(db:PostgresJsDatabase,workspaceId:string,
@@ -73,7 +159,7 @@ export async function readPortableLastContacted(db:PostgresJsDatabase,actorId:st
   const rows=await db.select({id:contacts.id,at:contacted.at}).from(contacts)
     .innerJoin(privateWorkspaces,eq(privateWorkspaces.id,contacts.workspaceId))
     .leftJoinLateral(contacted,sql`true`)
-    .where(and(recordWorkspaceScope(db,actorId,workspaceId,'contactOutreach'),inArray(contacts.id,ids),activeContact));
+    .where(and(workspaceId?ownedRecordScope(db,actorId,workspaceId,contacts,'view','contactOutreach'):recordWorkspaceScope(db,actorId),inArray(contacts.id,ids),activeContact));
   return Object.fromEntries(rows.map(row=>[row.id,date(row.at)]));
 }
 

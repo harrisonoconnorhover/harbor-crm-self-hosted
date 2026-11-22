@@ -1,0 +1,1 @@
+CREATE INDEX "portable_landing_search" ON "portable_landing_pages" USING gin (("draft"->>'title') public.gin_trgm_ops,("draft"->>'slug') public.gin_trgm_ops,("last_published"->>'title') public.gin_trgm_ops,("last_published"->>'slug') public.gin_trgm_ops);

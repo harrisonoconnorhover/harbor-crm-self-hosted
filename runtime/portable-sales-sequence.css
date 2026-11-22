@@ -1,0 +1,50 @@
+.portable-contacts > .portable-sequence-library {
+  max-inline-size: 64rem; margin: 1.25rem auto; padding: clamp(1rem,3vw,2.25rem);
+}
+.portable-sequence-library h1 { margin: 0; font-size: clamp(1.5rem,3vw,2rem); }
+.portable-sequence-library header p, .portable-sequence-hint { margin: .4rem 0; color: #52666a; }
+.portable-sequence-list, .portable-sequence-plan { padding: 0; margin: .75rem 0; }
+.portable-sequence-list { list-style: none; }
+.portable-sequence-list > li { display:flex; flex-wrap:wrap; align-items:center; justify-content: space-between; gap:.5rem; border-top:1px solid #dce5e3; padding:.65rem 0; }
+.portable-sequence-list > li > button { color: #075e63; font-weight: 650; overflow-wrap: anywhere; text-align: start; }
+.portable-sequence-list span, .portable-sequence-hint, .portable-sequence-plan span { font-size:.875rem; color:#506568; }
+.portable-contacts .portable-sequence-editor fieldset { display:block; min-width:0; padding:0; border:0; margin:0; }
+.portable-contacts .portable-sequence-editor { display:block; max-inline-size:46rem; padding:0; border:0; }
+.portable-sequence-editor > h2, .portable-sequence-contact h3 { margin:.75rem 0; font-size:1.125rem; font-weight:650; }
+.portable-sequence-editor label, .portable-sequence-enroll label { display:grid; gap:.32rem; font-size:.9rem; font-weight:600; margin-bottom:.65rem; }
+.portable-sequence-editor :is(input,select,textarea), .portable-sequence-enroll select {
+  box-sizing:border-box; min-width:0; width:100%; max-width:100%; font:inherit; font-weight:400; background:white; color:#263a3d;
+}
+.portable-sequence-editor textarea { border:1px solid #afc2c1; border-radius:5px; padding:.5rem; resize:vertical; }
+.portable-contacts .portable-sequence-editor fieldset.portable-sequence-step { border:1px solid #ccd9d6; border-radius:8px; padding: .75rem 1rem 1rem; margin:.9rem 0; }
+.portable-sequence-step legend { color:#305855; font-weight:650; padding:0 .3rem; }
+.portable-sequence-fields, .portable-sequence-review { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr)); gap:.3rem .8rem; }
+.portable-sequence-actions { display:flex; align-items:center; flex-wrap:wrap; gap:.45rem .65rem; margin-block:.45rem; }
+.portable-sequence-actions button { display:inline-flex; justify-content:center; align-items:center; gap:.25rem; min-height:38px; min-width:38px; }
+.portable-sequence-actions button:disabled { opacity:.5; }
+.portable-contacts .portable-sequence-primary { background:#075e63; color:white; }
+.portable-sequence-enroll, .portable-sequence-receipt { border-top:1px solid #dce5e3; margin-block-start:.75rem; padding-block-start:.5rem; max-inline-size:44rem; }
+.portable-sequence-contact { scroll-margin-block-start: calc(var(--portable-topbar-height,0px) + 12px); }
+.portable-sequence-enroll label { max-width:30rem; }
+.portable-sequence-review { margin:.5rem 0; }
+.portable-sequence-review dt { color:#506568; font-size:.85rem; }
+.portable-sequence-review dd { margin:0; overflow-wrap:anywhere; }
+.portable-sequence-plan { list-style:decimal; padding-inline-start:1.75rem; }
+.portable-sequence-plan li { border-bottom:1px solid #e6edeb; margin:0; padding:.55rem .15rem; }
+.portable-sequence-plan li > *, .portable-sequence-receipt p { display:block; overflow-wrap:anywhere; }
+@media(max-width:670px) {
+  .portable-contacts > .portable-sequence-library { margin:.6rem; }
+  .portable-sequence-actions button { min-height:44px; }
+}
+
+.portable-sequence-library .portable-sequence-tabs,
+.portable-sequence-library .portable-sequence-filters { display:flex; flex-wrap:wrap; gap:.25rem; margin:1rem 0; }
+.portable-sequence-tabs { border-bottom:1px solid #ccd9d6; }
+.portable-sequence-tabs a,.portable-sequence-filters a { display:inline-flex; align-items:center; padding:.55rem .85rem; text-decoration:none; }
+.portable-sequence-tabs a[aria-current] { border-bottom:3px solid #166c67; font-weight:650; }
+.portable-sequence-filters a[aria-current] { border-radius:6px; background:#e3efec; font-weight:650; }
+.portable-sequence-queue { list-style:none; margin:.75rem 0; padding:0; }
+.portable-sequence-queue li { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:.3rem 1rem; padding:.8rem 0; border-top:1px solid #dce5e2; overflow-wrap:anywhere; }
+.portable-sequence-queue li a { font-weight:600; }
+.portable-sequence-queue li p { margin:.3rem 0 0; }
+.portable-sequence-queue small { color:#506568; }

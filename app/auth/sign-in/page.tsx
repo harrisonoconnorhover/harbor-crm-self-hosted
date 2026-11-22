@@ -1,10 +1,12 @@
 import {env} from 'cloudflare:workers';
 import {redirect} from 'next/navigation';
-import {Anchor,ArrowRight,Check,LockKeyhole} from 'lucide-react';
+import {Anchor,Check,LockKeyhole} from 'lucide-react';
 import {authMode,googleLoginCallbackPath,googleLoginSetupIssues,loginOrigin,safeReturnPath} from '@/lib/identity';
 import {loginPageOptions} from '@/lib/login-page-options';
 import {readPublicPilotContact} from '@/lib/public-pilot-contact.mjs';
 import {portableTrial} from '@/lib/trial-platform';
+import {ProviderLinks} from './provider-links';
+import {PortableBookmarkLinks} from './portable-bookmark-links';
 import '../auth.css';
 import '../../trial-document.css';
 export const dynamic='force-dynamic';
@@ -20,8 +22,8 @@ export default async function SignIn({searchParams}:{searchParams:Promise<Record
   const reference=portableTrial&&(params.error==='sign_in_failed'||params.error==='account_conflict')&&typeof params.reference==='string'
     &&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(params.reference)
     ?params.reference:null;
-  const {googleReady,microsoftReady,showGoogleSetup,showMicrosoftSetup,microsoftCallback}=loginPageOptions(env);
-  const chooseAccount=googleReady&&microsoftReady?'Google or Microsoft account':microsoftReady||showMicrosoftSetup?'Microsoft account':'Google account';
+  const {googleReady,microsoftReady,showGoogleSetup,showMicrosoftSetup,microsoftCallback,samlReady,oidcReady,showOidcSetup,oidcCallback,showSamlSetup,samlCallback,samlMetadata}=loginPageOptions(env);
+  const chooseAccount=samlReady||oidcReady||showOidcSetup||showSamlSetup?(googleReady||microsoftReady?'approved account':'company account'):googleReady&&microsoftReady?'Google or Microsoft account':microsoftReady||showMicrosoftSetup?'Microsoft account':'Google account';
   let setupCallback:string|undefined;
   if(showGoogleSetup){
     try{setupCallback=loginOrigin(env).origin+googleLoginCallbackPath;}catch{/* No callback to show until the origin is valid. */}
@@ -30,6 +32,7 @@ export default async function SignIn({searchParams}:{searchParams:Promise<Record
   const missingSettings=setupIssues?.missing??Object.keys(signInSettings) as (keyof typeof signInSettings)[];
   const settingsToCheck=[...missingSettings,...(setupIssues?.invalidCredentials??[])];
   const needsClient=missingSettings.includes('HARBOR_LOGIN_GOOGLE_CLIENT_ID')&&missingSettings.includes('HARBOR_LOGIN_GOOGLE_CLIENT_SECRET');
+  const Links=portableTrial?PortableBookmarkLinks:ProviderLinks;
   return <div className="welcome-page">
     <header className="welcome-header">
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- Re-enter the authentication boundary with ordinary document navigation. */}
@@ -49,13 +52,21 @@ export default async function SignIn({searchParams}:{searchParams:Promise<Record
         <span className="welcome-card-icon" aria-hidden="true"><Anchor size={24}/></span>
         <h2 id="signin-title">Sign in to Harbor</h2>
         <p className="welcome-card-description">Use your {chooseAccount} to continue.</p>
-        {params.error==='account_conflict'?<p role="alert">This Harbor address already belongs to a different sign-in. Use your original account or ask your administrator to check the Microsoft account binding.</p>:
+        {params.error==='account_conflict'?<p role="alert">This Harbor address already belongs to a different sign-in. Use your original account or ask your administrator to check the {samlReady||oidcReady?'company sign-in':'Microsoft account'} binding.</p>:
           params.error&&<p role="alert">Sign-in could not be completed. Please start again and choose your {chooseAccount}.</p>}
         {reference&&<p className="auth-note welcome-support">If you contact support, share this reference <code>{reference}</code>.</p>}
         {params.signed_out&&<p role="status">You’re signed out of Harbor.</p>}
-        {googleReady&&<a className="auth-primary welcome-google" href={'/auth/google/start?return_to='+encodeURIComponent(returnTo)} target="_top"><span>Continue with Google</span><ArrowRight size={18} aria-hidden="true"/></a>}
-        {microsoftReady&&<a className="auth-primary welcome-google" href={'/auth/microsoft/start?return_to='+encodeURIComponent(returnTo)} target="_top"><span>Continue with Microsoft</span><ArrowRight size={18} aria-hidden="true"/></a>}
-        {!googleReady&&!microsoftReady&&<p role="alert">{showMicrosoftSetup?'Microsoft sign-in needs configuration. Contact the workspace administrator.':'Google sign-in needs configuration. Contact the workspace administrator.'}</p>}
+        <Links returnTo={returnTo} google={googleReady} microsoft={microsoftReady} saml={samlReady} oidc={oidcReady}/>
+        {!googleReady&&!microsoftReady&&!samlReady&&!oidcReady&&<p role="alert">{showSamlSetup||showOidcSetup?'Company sign-in needs configuration. Contact the workspace administrator.':showMicrosoftSetup?'Microsoft sign-in needs configuration. Contact the workspace administrator.':'Google sign-in needs configuration. Contact the workspace administrator.'}</p>}
+        {showOidcSetup&&<details className="welcome-setup"><summary>Setting up OpenID Connect?</summary>
+          <p>Configure the issuer, web client credentials and employee subject bindings in Harbor’s private environment.</p>
+          {oidcCallback&&<p>Redirect URI <code>{oidcCallback}</code></p>}
+        </details>}
+        {showSamlSetup&&<details className="welcome-setup">
+          <summary>Setting up company sign-in?</summary>
+          <p>Configure the company identity provider and employee bindings in Harbor’s private environment.</p>
+          {samlMetadata&&samlCallback&&<dl><dt>Harbor entity ID</dt><dd><code>{samlMetadata}</code></dd><dt>Reply URL (ACS)</dt><dd><code>{samlCallback}</code></dd></dl>}
+        </details>}
         {showMicrosoftSetup&&<details className="welcome-setup">
           <summary>Setting up Microsoft sign-in?</summary>
           <ol>
@@ -78,7 +89,7 @@ export default async function SignIn({searchParams}:{searchParams:Promise<Record
             <li>Apply the settings and reload this page. When the Google sign-in button appears, sign in with an approved account.</li>
           </ol>
         </details>}
-        <p className="auth-note welcome-permissions"><LockKeyhole size={16} aria-hidden="true"/><span>{microsoftReady?'Harbor uses your sign-in to identify you. Mail and calendar connections are separate.':'Sign-in shares your name and email address with Harbor. It does not connect Gmail or Calendar.'}</span></p>
+        <p className="auth-note welcome-permissions"><LockKeyhole size={16} aria-hidden="true"/><span>{microsoftReady||samlReady||oidcReady?'Harbor uses your sign-in to identify you. Mail and calendar connections are separate.':'Sign-in shares your name and email address with Harbor. It does not connect Gmail or Calendar.'}</span></p>
         <p className="auth-note welcome-invite">Joining a shared workspace? Use the account your administrator approved for the invited address.</p>
         {portableTrial&&<p className="auth-note welcome-support">
           {support?<>Need help signing in? <a href={'mailto:'+support.email}>Contact {support.name}</a>.</>:

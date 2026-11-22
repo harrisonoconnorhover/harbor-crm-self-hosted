@@ -67,13 +67,11 @@ export async function verifyPortableTaskQueues({request,origin,headers,other,sha
   assert.match(ownerHtml,/Export CSV/);
   const sharedHtml=await (await read('/?kind=tasks&workspaceId='+sharing.workspaceId,other)).text();
   assert.doesNotMatch(sharedHtml,/aria-label="Select Fictional task from editor"|Export CSV/);
-  const sharedNav=sharedHtml.match(/<nav aria-label="CRM records">([\s\S]*?)<\/nav>/)?.[1]??'';
-  const workspacesLink=Array.from(sharedNav.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g))
-    .find(([, ,content])=>content.replace(/<[^>]+>/g,'').trim()==='Workspaces')?.[1];
-  assert.equal(workspacesLink,'/?view=workspaces');
-  const switcher=await read(workspacesLink,other);
+  const workspacesLink=sharedHtml.match(/href="([^"]+)" aria-label="Workspaces"/)?.[1];
+  assert.equal(workspacesLink,'/?view=workspaces&amp;workspaceId='+sharing.workspaceId);
+  const switcher=await read(workspacesLink.replaceAll('&amp;','&'),other);
   assert.equal(switcher.status,200);
-  assert.match(await switcher.text(),/<h1>Workspaces<\/h1>/);
+  assert.match(await switcher.text(),/<h1>Switch workspace<\/h1>/);
   assert.equal((await read('/?kind=tasks&taskQueueId='+create.id,other)).status,404);
 
   const csvPath=taskPath+'&export=csv';

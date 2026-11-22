@@ -1,9 +1,11 @@
-import {and,desc,eq,lt} from 'drizzle-orm';
+import {and,desc,eq,isNull,isNotNull,lt,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
+import {readCommerceResult,type RecordAccessActor} from './record-access-store';
 import {ApiError} from '../../lib/api-error';
 import {formatCents} from '../../lib/commerce';
+import {privateWorkspaces} from './workspace-schema';
 import {validatePayment} from '../../lib/invoices';
-import {portableInvoiceState,type PortableInvoicePaymentWrite} from '../../lib/portable-invoices';
+import {portableInvoiceState,type PaymentLedgerQuery,type PortableInvoicePaymentWrite} from '../../lib/portable-invoices';
 import {portableInvoiceEvents as events,portableInvoicePayments as payments,portableInvoices as invoices} from './portable-invoice-schema';
 
 type Db=PostgresJsDatabase;
@@ -16,6 +18,27 @@ export async function readPortableInvoicePayments(db:Db,workspaceId:string,invoi
     before===undefined?undefined:lt(payments.revision,before))).orderBy(desc(payments.revision)).limit(limit+1);
   const items=rows.slice(0,limit).map(({data,...row})=>({...row,...data}));
   return {items,next:rows.length>limit?items.at(-1)!.revision:null};
+}
+
+export async function listRecordedPayments(db:Db,actor:RecordAccessActor,includeBody:boolean,query:PaymentLedgerQuery){
+  return readCommerceResult(db,actor,'invoices',includeBody&&'list',async tx=>{
+    const receivedOn=sql<string>`(${payments.data}->>'receivedOn')`;
+    const pageSize=25;
+    const rows=await tx.select({id:payments.id,invoiceId:payments.invoiceId,invoiceNumber:invoices.number,
+      buyer:sql<string>`${invoices.data}->'buyer'->>'name'`,revision:payments.revision,receivedOn,
+      amountCents:sql<number>`(${payments.data}->>'amountCents')::bigint`.mapWith(Number),
+      method:sql<typeof payments.$inferSelect.data.method>`${payments.data}->>'method'`,
+      reference:sql<string>`${payments.data}->>'reference'`,unappliedAt:payments.unappliedAt})
+      .from(payments).innerJoin(privateWorkspaces,eq(privateWorkspaces.id,payments.workspaceId))
+      .innerJoin(invoices,and(eq(invoices.workspaceId,payments.workspaceId),eq(invoices.id,payments.invoiceId)))
+      .where(and(eq(privateWorkspaces.ownerId,actor.userId),
+        query.status==='applied'?isNull(payments.unappliedAt):query.status==='unapplied'?isNotNull(payments.unappliedAt):undefined,
+        query.beforeDate?sql`(${receivedOn},${payments.id}) < (${query.beforeDate},${query.beforeId}::uuid)`:undefined))
+      .orderBy(desc(receivedOn),desc(payments.id)).limit(pageSize+1);
+    const items=rows.slice(0,pageSize);
+    const last=items.at(-1);
+    return {items,next:rows.length>pageSize&&last?{beforeDate:last.receivedOn,beforeId:last.id}:null};
+  },result=>result.items.map(row=>row.invoiceId));
 }
 
 // The caller holds the owner-workspace and invoice row locks through this write.

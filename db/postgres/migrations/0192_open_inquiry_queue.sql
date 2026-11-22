@@ -1,0 +1,1 @@
+CREATE INDEX "portable_lead_inquiries_open_page" ON "portable_lead_inquiries" USING btree ("workspace_id","received_at","id") WHERE NOT "portable_lead_inquiries"."handled" AND "portable_lead_inquiries"."status" <> 'removed';

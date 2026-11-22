@@ -1,6 +1,6 @@
 import {readPortableSegments,writePortableSegment} from '../db/postgres/portable-segment-store';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
-import {portableSegmentRead,portableSegmentWrite} from '../lib/portable-segments';
+import {listSummary,portableSegmentRead,portableSegmentWrite} from '../lib/portable-segments';
 import {portableApiIdentity} from './portable-api-identity';
 import {portableDb} from './portable-db';
 
@@ -24,12 +24,15 @@ async function segmentRoute(request:Request){
       if(params.size!==new Set(params.keys()).size)return json({error:'Invalid segment query.'},400);
       const query=portableSegmentRead.safeParse(Object.fromEntries(params));
       if(!query.success)return json({error:'Invalid segment query.'},400);
-      const result=await readPortableSegments(db,user.userId,query.data);
-      return result?json(result):json({error:errors.missing.message},errors.missing.status);
+      const result=await readPortableSegments(db,user,query.data,request.method!=='HEAD');
+      if(!result)return json({error:errors.missing.message},errors.missing.status);
+      if(query.data.workspaceId)return json('items' in result?{...result,segment:listSummary(result.segment)}:
+        {segments:result.segments.map(listSummary),next:result.next});
+      return json(result);
     }
     if(params.size)return json({error:'Open your own workspace to manage segments.'},403);
     let raw:unknown;
-    try{const text=await readBoundedRequestText(request,8_192);if(text!==null)raw=JSON.parse(text);}catch{}
+    try{const text=await readBoundedRequestText(request,32_768);if(text!==null)raw=JSON.parse(text);}catch{}
     const input=portableSegmentWrite.safeParse(raw);
     if(!input.success)return json({error:'Check the segment details and Contact selection.'},400);
     const result=await writePortableSegment(db,user.userId,input.data);

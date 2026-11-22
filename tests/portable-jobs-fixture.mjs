@@ -257,7 +257,24 @@ export async function verifyPortableJobs({request,origin,headers,other,record,ot
   assert.equal(empty.lastSuccessfulPollAt,null);
   assert.deepEqual(empty.review,{failed:false,uncertain:false,suppressedEmail:false});
   assert.equal((await queue(2,true)).workerHeartbeat,'missing');
-  await one();
+  // The lifecycle wait must hold even if the ordinary due timestamp has elapsed.
+  const heldNote=payload('Note waiting for a customer');
+  assert.equal((await write(headers,record,heldNote)).status,202);
+  await sql`UPDATE portable_jobs SET wait_for_lifecycle='Customer' WHERE id=${heldNote.id}`;
+  try{
+    const held=await queue();
+    assert.equal(held.oldestDueAt,null);
+    assert.equal(held.overdue,false);
+    await one();
+    assert.equal((await status(heldNote.id)).attempts,0);
+    assert.equal(await noteCount(heldNote.id),0);
+    const {items}=await (await list(headers,record)).json();
+    assert.equal(items.find(item=>item.id===heldNote.id)?.waitForLifecycle,'Customer');
+    assert.equal((await write(headers,record,{action:'cancelNote',id:heldNote.id})).status,200);
+    assert.equal((await status(heldNote.id)).status,'skipped');
+  }finally{
+    await sql`DELETE FROM portable_jobs WHERE id=${heldNote.id}`;
+  }
   assert.equal((await queue(2,true)).workerHeartbeat,'missing');
 
   const futurePoll=Date.now()+86_400_000;
@@ -328,7 +345,7 @@ export async function verifyPortableJobs({request,origin,headers,other,record,ot
       const monitorPassword=randomBytes(16).toString('hex');
       await sql.unsafe("CREATE ROLE "+monitorUser+" LOGIN PASSWORD '"+monitorPassword+"'");
       try{
-        await sql`GRANT SELECT (status, available_at, scheduled_for, operator_retry_at, lease_until, finished_at)
+        await sql`GRANT SELECT (status, available_at, scheduled_for, wait_for_lifecycle, operator_retry_at, lease_until, finished_at)
           ON public.portable_jobs TO ${sql(monitorUser)}`;
         await sql`GRANT SELECT (id, last_poll_at) ON public.portable_worker_heartbeat TO ${sql(monitorUser)}`;
         const monitorUrl=new URL(env.DATABASE_URL);
@@ -438,7 +455,7 @@ export async function verifyPortableJobs({request,origin,headers,other,record,ot
           await sql`REVOKE SELECT (status, created_at) ON public.portable_calendar_reschedules FROM ${sql(monitorUser)}`;
         }
       }finally{
-        await sql`REVOKE SELECT (status, available_at, scheduled_for, operator_retry_at, lease_until, finished_at,
+        await sql`REVOKE SELECT (status, available_at, scheduled_for, wait_for_lifecycle, operator_retry_at, lease_until, finished_at,
           operator_reviewed_at, kind, issue) ON public.portable_jobs FROM ${sql(monitorUser)}`;
         await sql`REVOKE SELECT (id, last_poll_at, last_queue_poll_at) ON public.portable_worker_heartbeat FROM ${sql(monitorUser)}`;
         await sql`REVOKE SELECT (source_id) ON public.portable_backup_source FROM ${sql(monitorUser)}`;
@@ -476,8 +493,8 @@ export async function verifyPortableJobs({request,origin,headers,other,record,ot
         assert.ok(!segmentMetrics.includes(workflowName));
         assert.ok(!JSON.stringify(stalledScan).includes(workflowId));
         assert.ok(!JSON.stringify(stalledScan).includes(workflowName));
-        assert.match(await (await request('/?view=workflows',{headers})).text(),/Segment check overdue/);
-        assert.doesNotMatch(await (await request('/?view=workflows',{headers:other})).text(),/Segment check overdue/);
+        assert.match(await (await request('/?view=workflows',{headers})).text(),/List check overdue/);
+        assert.doesNotMatch(await (await request('/?view=workflows',{headers:other})).text(),/List check overdue/);
       });
       await one();
       for(let poll=0;poll<30;poll++){
@@ -488,7 +505,7 @@ export async function verifyPortableJobs({request,origin,headers,other,record,ot
       assert.deepEqual((await monitor(0,['--verify','--segments'])).segments,{result:'ok',overdue:false});
       assert.match(await monitor(0,['--segments','--prometheus']),/^harbor_monitor_segment_scan_overdue 0$/m);
       assert.doesNotMatch(await monitor(0,['--prometheus']),/harbor_monitor_segment_scan_overdue/);
-      assert.doesNotMatch(await (await request('/?view=workflows',{headers})).text(),/Segment check overdue/);
+      assert.doesNotMatch(await (await request('/?view=workflows',{headers})).text(),/List check overdue/);
     }finally{
       await sql.begin(async tx=>{
         await tx`SELECT id FROM private_workspaces WHERE id=(SELECT workspace_id
@@ -1221,8 +1238,8 @@ if(process.argv[2]==='_backup-status')writeFileSync(${JSON.stringify(helperMarke
     assert.deepEqual(await clockExit,[0,null]);
   }
   const pending=Array.from({length:99},()=>randomUUID());
-  await sql`INSERT INTO portable_jobs(workspace_id,id,contact_id,actor_id,kind,body,scheduled_for,available_at,created_at)
-    SELECT ${owner.workspace_id}, id, ${record.id}, ${owner.actor_id}, 'note', 'Cap fixture', 0, 9999999999999, 0
+  await sql`INSERT INTO portable_jobs(workspace_id,id,contact_id,actor_id,kind,body,scheduled_for,available_at,created_at,wait_for_lifecycle)
+    SELECT ${owner.workspace_id}, id, ${record.id}, ${owner.actor_id}, 'note', 'Cap fixture', 0, 9999999999999, 0, 'Customer'
     FROM unnest(${pending}::uuid[]) AS id`;
   try{
     assert.equal((await write(headers,record,payload('Over capacity'))).status,429);

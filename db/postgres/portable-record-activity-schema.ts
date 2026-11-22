@@ -1,5 +1,6 @@
 import {bigint,check,foreignKey,index,integer,pgTable,primaryKey,text,uuid} from 'drizzle-orm/pg-core';
 import {sql} from 'drizzle-orm';
+import {wordSearchDocument} from './search-index';
 import type {PortableOutreach} from '../../lib/portable-contact-activities';
 import {companies} from './company-schema';
 import {deals} from './deal-schema';
@@ -17,6 +18,7 @@ export const portableRecordActivities=pgTable('portable_record_activities',{
   recordedAt:bigint('recorded_at',{mode:'number'}).notNull(),
   summary:text('summary').notNull(),
 },table=>[
+  index('portable_record_call_summary_search').using('gin',wordSearchDocument(table.summary)).where(sql`${table.kind} = 'Call'`),
   primaryKey({columns:[table.workspaceId,table.id]}),
   foreignKey({name:'portable_record_activity_company_fk',columns:[table.workspaceId,table.companyId],foreignColumns:[companies.workspaceId,companies.id]}),
   foreignKey({name:'portable_record_activity_deal_fk',columns:[table.workspaceId,table.dealId],foreignColumns:[deals.workspaceId,deals.id]}),

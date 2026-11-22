@@ -1,0 +1,6 @@
+CREATE INDEX "contacts_archived_time_page" ON "contacts" USING btree ("workspace_id",date_trunc('milliseconds',"archived_at" AT TIME ZONE 'UTC'),"id") WHERE "contacts"."archived_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "companies_archived_time_page" ON "companies" USING btree ("workspace_id",date_trunc('milliseconds',"archived_at" AT TIME ZONE 'UTC'),"id") WHERE "companies"."archived_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "deals_archived_time_page" ON "deals" USING btree ("workspace_id",date_trunc('milliseconds',"archived_at" AT TIME ZONE 'UTC'),"id") WHERE "deals"."archived_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "portable_tasks_archived_time_page" ON "portable_tasks" USING btree ("workspace_id",date_trunc('milliseconds',"archived_at" AT TIME ZONE 'UTC'),"id") WHERE "portable_tasks"."archived_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "portable_leads_archived_time_page" ON "portable_leads" USING btree ("workspace_id",date_trunc('milliseconds',"archived_at" AT TIME ZONE 'UTC'),"id") WHERE "portable_leads"."archived_at" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "portable_tickets_archived_time_page" ON "portable_tickets" USING btree ("workspace_id",date_trunc('milliseconds',"archived_at" AT TIME ZONE 'UTC'),"id") WHERE "portable_tickets"."archived_at" IS NOT NULL;

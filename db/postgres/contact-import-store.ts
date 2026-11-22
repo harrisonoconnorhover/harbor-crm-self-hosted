@@ -1,3 +1,4 @@
+import {captureRecordWorkflowTasks} from './record-task-workflow-store';
 import {and,count,eq,inArray,sql} from 'drizzle-orm';
 import {z} from 'zod';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
@@ -10,6 +11,7 @@ import type {PortableCustomValues} from '../../lib/portable-custom-properties';
 import type {PortableRecordKind} from '../../lib/portable-records';
 import {companies,companyEvents} from './company-schema';
 import {applyRecordCorrections,prepareReviewedCsv} from './record-import-corrections';
+import {recordAccess,type RecordAccessActor} from './record-access-store';
 import {contactImportReceipts} from './contact-import-schema';
 import {contacts,contactEvents,privateWorkspaces} from './contact-schema';
 import {activeContact} from './contact-visibility';
@@ -54,7 +56,7 @@ async function resolveContactImportCompanies(db:PostgresJsDatabase,workspaceId:s
   const found=new Map<string,{id:string;name:string}>();
   if(workspaceId&&ids.size){
     const query=db.select({id:companies.id,name:sql<string>`${companies.data}->>'name'`}).from(companies)
-      .where(and(eq(companies.workspaceId,workspaceId),inArray(companies.id,[...ids]))).orderBy(companies.id);
+      .where(and(eq(companies.workspaceId,workspaceId),activeCompany,inArray(companies.id,[...ids]))).orderBy(companies.id);
     for(const company of await (lock?query.for('share'):query))found.set(company.id,company);
   }
   return rows.map(row=>{
@@ -94,7 +96,7 @@ async function reviewRows(db:PostgresJsDatabase,actorId:string,workspaceId:strin
   const review=await sha256(JSON.stringify(key));
   const created=prepared.rows.filter(row=>row.state==='create').length;
   const skipped=prepared.rows.filter(row=>row.state==='skip').length-corrections.length;
-  return {review,prepared,created,skipped,corrections,errors:prepared.rows.length-created-skipped-corrections.length};
+  return {review,prepared,created,skipped,corrections,previewedIds:checked?.previewedIds??[],errors:prepared.rows.length-created-skipped-corrections.length};
 }
 
 type PreviewRow=RecordImportPreview['rows'][number];
@@ -111,14 +113,21 @@ function previewRows(prepared:PreparedRecordCsv,properties:MappedRecordCsv['prop
     ?{row:row.row,state:row.state,name:row.data.data.name,pipeline:row.data.pipelineName,stage:row.data.data.stage,...customPreview(row.data.data.custom)}:row);
 }
 
-export async function previewPortableRecordImport(db:PostgresJsDatabase,actorId:string,object:PortableRecordKind,sourceHash:string,text:string,mapping?:string[],
+export async function previewPortableRecordImport(db:PostgresJsDatabase,actor:RecordAccessActor,object:PortableRecordKind,sourceHash:string,text:string,mapping?:string[],
   reviewMatches=false):Promise<RecordImportPreview>{
-  const [workspace]=await db.select({id:privateWorkspaces.id}).from(privateWorkspaces).where(eq(privateWorkspaces.ownerId,actorId));
-  const {csv,reviewSource}=await mappedImportSource(db,actorId,object,sourceHash,text,mapping,reviewMatches);
-  const {prepared,corrections,...review}=await reviewRows(db,actorId,workspace?.id,object,reviewSource,csv,reviewMatches);
-  const updates=new Map(corrections.map(({preview})=>[preview.row,preview]));
-  return {...review,...(reviewMatches?{updates:updates.size}:{}),columns:prepared.columns,
-    rows:previewRows(prepared,csv.properties).map(row=>updates.get(row.row)??row)};
+  return db.transaction(async tx=>{
+    const [workspace]=await tx.select({id:privateWorkspaces.id}).from(privateWorkspaces).where(eq(privateWorkspaces.ownerId,actor.userId));
+    const {csv,reviewSource}=await mappedImportSource(tx,actor.userId,object,sourceHash,text,mapping,reviewMatches);
+    const {prepared,corrections,previewedIds,...review}=await reviewRows(tx,actor.userId,workspace?.id,object,reviewSource,csv,reviewMatches);
+    const updates=new Map(corrections.map(({preview})=>[preview.row,preview]));
+    await recordAccess(tx,actor,object,'import_preview',previewedIds,workspace?.id);
+    if(prepared.kind==='contacts'){
+      const companyIds=new Set(prepared.rows.flatMap(row=>row.state==='create'&&row.data.importCompany?[row.data.importCompany.id]:[]));
+      await recordAccess(tx,actor,'companies','import_preview',[...companyIds],workspace?.id);
+    }
+    return {...review,...(reviewMatches?{updates:updates.size}:{}),columns:prepared.columns,
+      rows:previewRows(prepared,csv.properties).map(row=>updates.get(row.row)??row)};
+  },{isolationLevel:'repeatable read'});
 }
 
 async function insertRows(tx:Transaction,workspaceId:string,actorId:string,prepared:PreparedRecordCsv){
@@ -140,6 +149,7 @@ async function insertRows(tx:Transaction,workspaceId:string,actorId:string,prepa
     const rows=mapped.map(row=>row.record);
     await tx.insert(companies).values(rows);
     await tx.insert(companyEvents).values(rows.map(row=>({...event,companyId:row.id,data:row.data})));
+    await captureRecordWorkflowTasks(tx,workspaceId,actorId,{trigger:'company_created',records:rows.map(row=>({id:row.id,recordOwner:row.data.recordOwner}))},now);
     return new Map(mapped.map(row=>[row.row,row.record.id]));
   }else{
     const rows=prepared.rows.flatMap(row=>row.state==='create'?[{...record(),data:row.data.data,
@@ -221,17 +231,21 @@ async function reviewPairedRows(db:PostgresJsDatabase,actorId:string,workspaceId
   return {source,plan,existing,review,result:{created,skipped,paired},errors};
 }
 
-export async function previewPortablePairedImport(db:PostgresJsDatabase,actorId:string,text:string,mapping?:string[]):Promise<RecordImportPreview>{
-  const [workspace]=await db.select({id:privateWorkspaces.id}).from(privateWorkspaces).where(eq(privateWorkspaces.ownerId,actorId));
-  const {source,plan,existing,review,result,errors}=await reviewPairedRows(db,actorId,workspace?.id,text,mapping);
-  const companyRows=previewRows(plan.companyRows,[]).map(row=>({...row,object:'Company' as const,row:plan.companies.sourceRows[row.row-2][0]}));
-  const contacts=previewRows(plan.contactRows,[]).map(row=>{
-    const target=plan.links.get(row.row-2),company=target===undefined?undefined:plan.companyRows.rows[target];
-    const label=company?.state==='create'?company.data.name:company?existing.get(company.row)?.name:undefined;
-    return {...row,...(row.state==='create'&&label?{company:label}:{}),object:'Contact' as const,row:plan.contacts.sourceRows[row.row-2][0]};
-  });
-  return {...result,review,errors,rows:[...companyRows,...contacts],
-    columns:source.headers.map((header,index)=>({header,field:source.fields.get(source.mapping[index])??null}))};
+export async function previewPortablePairedImport(db:PostgresJsDatabase,actor:RecordAccessActor,text:string,mapping?:string[]):Promise<RecordImportPreview>{
+  return db.transaction(async tx=>{
+    const [workspace]=await tx.select({id:privateWorkspaces.id}).from(privateWorkspaces).where(eq(privateWorkspaces.ownerId,actor.userId));
+    const {source,plan,existing,review,result,errors}=await reviewPairedRows(tx,actor.userId,workspace?.id,text,mapping);
+    const companyRows=previewRows(plan.companyRows,[]).map(row=>({...row,object:'Company' as const,row:plan.companies.sourceRows[row.row-2][0]}));
+    const contacts=previewRows(plan.contactRows,[]).map(row=>{
+      const target=plan.links.get(row.row-2),company=target===undefined?undefined:plan.companyRows.rows[target];
+      const label=company?.state==='create'?company.data.name:company?existing.get(company.row)?.name:undefined;
+      return {...row,...(row.state==='create'&&label?{company:label}:{}),object:'Contact' as const,row:plan.contacts.sourceRows[row.row-2][0]};
+    });
+    const companyIds=new Set([...existing.values()].map(company=>company.id));
+    await recordAccess(tx,actor,'companies','import_preview',[...companyIds],workspace?.id);
+    return {...result,review,errors,rows:[...companyRows,...contacts],
+      columns:source.headers.map((header,index)=>({header,field:source.fields.get(source.mapping[index])??null}))};
+  },{isolationLevel:'repeatable read'});
 }
 
 export async function commitPortablePairedImport(db:PostgresJsDatabase,actorId:string,input:RecordImportCommit){

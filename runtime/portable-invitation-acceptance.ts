@@ -1,5 +1,5 @@
 type WorkspaceRequest=(path:string,init:RequestInit)=>Promise<Response>;
-type WorkspaceReply={shared?:({id?:string}|null)[];incoming?:({id?:string}|null)[];error?:string};
+type WorkspaceReply={sharedNext?:string|null;shared?:({id?:string}|null)[];incoming?:({id?:string}|null)[];error?:string};
 type Acceptance={status:'accepted'}|{status:'denied'|'pending'|'unconfirmed';message:string};
 
 type AdministrationScope={workspaceId:string;grantId:string};
@@ -8,8 +8,18 @@ const path=(scope?:AdministrationScope)=>scope?'/api/workspaces?'+new URLSearchP
 }):'/api/workspaces';
 const responseTimeoutMs=12_000;
 const readReply=async(response:Response)=>await response.json().catch(()=>undefined) as WorkspaceReply|undefined;
-const hasAccess=(body:WorkspaceReply|undefined,workspaceId:string)=>
-  Array.isArray(body?.shared)&&body.shared.some(workspace=>workspace?.id===workspaceId);
+async function hasAccess(request:WorkspaceRequest,body:WorkspaceReply|undefined,workspaceId:string){
+  if(body?.shared?.some(workspace=>workspace?.id===workspaceId))return true;
+  if(!body?.sharedNext)return false;
+  // The accepted workspace can be beyond the account overview's first page.
+  const response=await request('/api/workspaces?'+new URLSearchParams({joined:'1',current:workspaceId}),
+    {cache:'no-store',signal:AbortSignal.timeout(responseTimeoutMs)});
+  if(response.status===404)return false;
+  if(!response.ok)throw Error('Could not confirm workspace access.');
+  const page=await response.json() as {current?:{id:string}};
+  if(page?.current?.id!==workspaceId)throw Error('Could not confirm workspace access.');
+  return true;
+}
 
 export function requestWorkspaceChange(request:WorkspaceRequest,data:object,scope?:AdministrationScope){
   return request(path(scope),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data),
@@ -54,8 +64,10 @@ export async function acceptReviewedWorkspaceInvitation(request:WorkspaceRequest
     if(response?.ok){
       const body=await readReply(response);
       if(Array.isArray(body?.shared)){
-        return hasAccess(body,workspaceId)?{status:'accepted'}:
-          {status:'denied',message:'Workspace access is unavailable. Refresh the sharing list.'};
+        try{
+          return await hasAccess(request,body,workspaceId)?{status:'accepted'}:
+            {status:'denied',message:'Workspace access is unavailable. Refresh the sharing list.'};
+        }catch{return {status:'unconfirmed',message:'Could not confirm workspace access. Check access again.'};}
       }
     }else if(response&&response.status>=400&&response.status<500){
       const body=await readReply(response);
@@ -68,7 +80,7 @@ export async function acceptReviewedWorkspaceInvitation(request:WorkspaceRequest
   // A lost reply or a second tab's 404 can follow a committed acceptance.
   try{
     const body=await readWorkspaceAccess<WorkspaceReply>(request);
-    if(hasAccess(body,workspaceId))return {status:'accepted'};
+    if(await hasAccess(request,body,workspaceId))return {status:'accepted'};
     if(!unavailableMessage&&Array.isArray(body?.incoming)&&body.incoming.some(invitation=>invitation?.id===id)){
       return {status:'pending',message:'The invitation is still pending. Choose Accept invitation to try again.'};
     }

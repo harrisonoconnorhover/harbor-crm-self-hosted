@@ -1,3 +1,4 @@
+import {recordAccess,recordPreviewAccess} from '../db/postgres/record-access-store';
 import {mergePortableCompanies,previewPortableCompanyMerge} from '../db/postgres/portable-company-merge-store';
 import {mergePortableContacts,previewPortableContactMerge} from '../db/postgres/portable-contact-merge-store';
 import {ApiError} from '../lib/api-error';
@@ -27,7 +28,14 @@ export async function POST(request:Request){
     if(!input.success)return json({error:'Choose two different Contacts or Companies to merge.'},400);
     const db=portableDb(),contacts=input.data.kind==='contacts';
     if(input.data.action==='preview'){
-      return json({preview:await (contacts?previewPortableContactMerge:previewPortableCompanyMerge)(db,user.userId,input.data,shared)});
+      const selection=input.data;
+      return await db.transaction(async tx=>{
+        const preview=await (contacts?previewPortableContactMerge:previewPortableCompanyMerge)(tx,user.userId,selection,shared);
+        const records=[preview.primary,preview.secondary];
+        await recordAccess(tx,user,preview.kind,'merge_preview',records.map(row=>row.id),shared?.workspaceId);
+        await recordPreviewAccess(tx,user,'related',records.flatMap(row=>row.primaryCompanyId?[{kind:'companies',id:row.primaryCompanyId}]:[]),shared?.workspaceId);
+        return json({preview});
+      });
     }
     return json({receipt:await (contacts?mergePortableContacts:mergePortableCompanies)(db,user.userId,input.data,shared)});
   }catch(error){

@@ -1,10 +1,12 @@
 'use client';
 
+import {CategoryBrowser,CategoryPicker,categoryName} from './portable-knowledge-category-picker';
+import {HelpCenterControls} from './portable-help-center-ui';
 import {useEffect,useRef,useState} from 'react';
 import {ArticleEditor} from '../app/article-editor';
 import type {listPortableArticles,readPortableArticle,readPortableArticleHistory,readPortableArticleVersion} from '../db/postgres/knowledge-store';
 import {articleVersionLabel,emptyArticle,normalizeArticleHtml,type articleMutation} from '../lib/knowledge-base';
-import {portableArticleCopyPath,portableArticlePath,type portableArticleCopy,type PortableKnowledgeCategory} from '../lib/portable-knowledge';
+import {portableArticleCopyPath,portableArticlePath,type portableArticleCopy,type KnowledgeCategoryPage,type PortableKnowledgeCategory} from '../lib/portable-knowledge';
 import type {z} from 'zod';
 import '../app/knowledge-base.css';
 import {PortableCrmHeader} from './portable-crm-header';
@@ -16,8 +18,8 @@ type Version=Awaited<ReturnType<typeof readPortableArticleVersion>>;
 type List=Awaited<ReturnType<typeof listPortableArticles>>;
 type Mutation=z.infer<typeof articleMutation>;
 type Copy=ReturnType<typeof portableArticleCopy>&{sourceId:string;sourceTitle:string};
-type Filters={status:'draft'|'archived'|'all';q:string;categoryId?:string};
-const categoryName=(category:PortableKnowledgeCategory)=>category.parentName?category.parentName+' › '+category.name:category.name;
+type Filters={match?:'phrase'|'words';status:'draft'|'archived'|'all';q:string;categoryId?:string};
+type Categories={categories:KnowledgeCategoryPage;selectedCategory?:PortableKnowledgeCategory};
 const api='/api/knowledge-base';
 const articlePath=(id:string)=>portableArticlePath+'&article='+id;
 const date=(time:number)=>new Date(time).toISOString().slice(0,10);
@@ -44,7 +46,7 @@ function ArticlePreview({title,subtitle,bodyHtml}:{title:string;subtitle:string;
   </section>;
 }
 
-function EditArticle({initial,copy,categories}:{initial?:Article;copy?:Copy;categories:PortableKnowledgeCategory[]}){
+function EditArticle({initial,copy,categories,selectedCategory}:Categories&{initial?:Article;copy?:Copy}){
   const [saved,setSaved]=useState(initial);
   const [content,setContent]=useState(initial?.content??copy?.content??emptyArticle);
   const [tags,setTags]=useState((initial??copy)?.content.tags.join(', ')??'');
@@ -111,8 +113,9 @@ function EditArticle({initial,copy,categories}:{initial?:Article;copy?:Copy;cate
       <h1>{archived?'Archived article':saved?'Edit article':copy?'Duplicate draft':'New article'}</h1>
       <a href={portableArticlePath}>Back to articles</a>
     </div>
-    <p>{archived?'Restore this article to drafts to edit it.':'Only you can see this draft.'}
+    <p>{archived?'Restore this article to drafts to edit it.':'Changes stay private until you publish the saved version.'}
       {saved&&' · Version '+saved.revision}</p>
+    {saved&&<HelpCenterControls key={saved.id+'-'+saved.revision} article={saved} dirty={dirty}/>}
     {copy&&!saved&&<p role="note">Unsaved copy of <a href={articlePath(copy.sourceId)}>{copy.sourceTitle}</a>.
       {' '}Nothing is saved until you click Save draft.
       {copy.categoryCleared&&' The original category is no longer active, so choose another.'}</p>}
@@ -155,12 +158,8 @@ function EditArticle({initial,copy,categories}:{initial?:Article;copy?:Copy;cate
       </div>
       <aside className="article-settings">
         <h2>Article settings</h2>
-        <label>Category<select value={content.categoryId??''} disabled={busy}
-          onChange={event=>{setContent({...content,categoryId:event.target.value||null,category:event.target.value?'':content.category});setDirty(true);}}>
-          <option value="">No managed category</option>
-          {categories.map(category=><option key={category.id} value={category.id}>{categoryName(category)}</option>)}
-          {content.categoryId&&!categories.some(category=>category.id===content.categoryId)&&<option value={content.categoryId}>Archived category</option>}
-        </select></label>
+        <CategoryPicker initial={categories} selected={selectedCategory} label="Category" empty="No managed category"
+          disabled={busy} value={content.categoryId??null} onChange={id=>{setContent({...content,categoryId:id||null,category:id?'':content.category});setDirty(true);}}/>
         {!content.categoryId&&<label>Other category text<input maxLength={203} value={content.category} disabled={busy}
           onChange={event=>{setContent({...content,category:event.target.value});setDirty(true);}}/></label>}
         <label>Tags<input placeholder="setup, accounts" value={tags} disabled={busy}
@@ -171,20 +170,20 @@ function EditArticle({initial,copy,categories}:{initial?:Article;copy?:Copy;cate
   </>;
 }
 
-function ArticleList({list,filters,paged,categories}:{list:List;filters:Filters;paged:boolean;categories:PortableKnowledgeCategory[]}){
-  const first=new URLSearchParams({view:'knowledge',status:filters.status,q:filters.q,...(filters.categoryId?{categoryId:filters.categoryId}:{})});
+function ArticleList({list,filters,paged,categories,selectedCategory}:Categories&{list:List;filters:Filters;paged:boolean}){
+  const first=new URLSearchParams({view:'knowledge',status:filters.status,q:filters.q,...(filters.match?{match:filters.match}:{}),...(filters.categoryId?{categoryId:filters.categoryId}:{})});
   const next=list.next?new URLSearchParams({...Object.fromEntries(first),afterAt:String(list.next.afterAt),afterId:list.next.afterId}):null;
   return <>
     <div className="portable-contacts-heading"><h1>Knowledge base</h1><a href={articlePath('new')}>New article</a></div>
-    <p>Write and organize private articles.</p>
+    <HelpCenterControls/>
     <form action="/" method="get">
       <input type="hidden" name="view" value="knowledge"/>
       <fieldset>
         <label>Search articles<input name="q" maxLength={200} defaultValue={filters.q}/></label>
-        <label>Category<select name="categoryId" defaultValue={filters.categoryId??''}>
-          <option value="">All categories</option>
-          {categories.map(category=><option key={category.id} value={category.id}>{categoryName(category)}</option>)}
+        <label>Search matching<select name="match" defaultValue={filters.match??'phrase'}>
+          <option value="phrase">Exact phrase</option><option value="words">All words</option>
         </select></label>
+        <CategoryPicker initial={categories} selected={selectedCategory} label="Category" name="categoryId" empty="All categories"/>
         <label>Status<select name="status" defaultValue={filters.status}>
           <option value="draft">Drafts</option><option value="archived">Archived</option><option value="all">All articles</option>
         </select></label>
@@ -207,10 +206,10 @@ function ArticleList({list,filters,paged,categories}:{list:List;filters:Filters;
 }
 
 // Create, rename and archive categories. Each change reloads the page.
-function ManageCategories({categories}:{categories:PortableKnowledgeCategory[]}){
+function ManageCategories({categories}:Categories){
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
-  const [archived,setArchived]=useState<PortableKnowledgeCategory[]>();
+  const [archived,setArchived]=useState(false);
   const pending=useRef<string|undefined>(undefined);
   async function change(body:unknown){
     setBusy(true);setError('');
@@ -223,11 +222,6 @@ function ManageCategories({categories}:{categories:PortableKnowledgeCategory[]})
     }catch{setError('Harbor could not confirm the change. Reload to check.');}
     finally{setBusy(false);}
   }
-  async function showArchived(){
-    const response=await fetch(api+'/categories?status=archived',{cache:'no-store'});
-    if(response.ok)setArchived((await response.json() as {items:PortableKnowledgeCategory[]}).items);
-  }
-  const tops=categories.filter(category=>!category.parentId);
   return <details>
     <summary>Manage categories</summary>
     {error&&<p role="alert">{error}</p>}
@@ -239,29 +233,28 @@ function ManageCategories({categories}:{categories:PortableKnowledgeCategory[]})
     }}><fieldset disabled={busy}>
       <label>Name<input name="name" required maxLength={100}/></label>
       <label>Description<input name="description" maxLength={400}/></label>
-      <label>Parent<select name="parentId" defaultValue=""><option value="">Top level</option>
-        {tops.map(category=><option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+      <CategoryPicker initial={categories} label="Parent" name="parentId" empty="Top level" parentsOnly/>
       <button type="submit">Add category</button>
     </fieldset></form>
-    {categories.length?<table><thead><tr><th>Category</th><th>Articles</th><th>Actions</th></tr></thead>
-      <tbody>{categories.map(category=><tr key={category.id}><td>{categoryName(category)}{category.description&&<small>{category.description}</small>}</td>
+    <section aria-label="Active categories"><CategoryBrowser initial={categories}>{items=>items.length?<table><thead><tr><th>Category</th><th>Articles</th><th>Actions</th></tr></thead>
+      <tbody>{items.map(category=><tr key={category.id}><td>{categoryName(category)}{category.description&&<small>{category.description}</small>}</td>
         <td>{category.articleCount}</td>
         <td><button type="button" disabled={busy} onClick={()=>{
           const name=window.prompt('Rename category',category.name)?.trim();
           if(name&&name!==category.name)void change({action:'save',id:category.id,revision:category.revision,name,description:category.description,parentId:category.parentId});
         }}>Rename</button>{' '}
         <button type="button" disabled={busy} onClick={()=>void change({action:'archive',id:category.id,revision:category.revision,archived:true})}>Archive</button></td>
-      </tr>)}</tbody></table>:<p>No categories yet.</p>}
-    {archived?<ul aria-label="Archived categories">{archived.map(category=><li key={category.id}>{categoryName(category)}{' '}
+      </tr>)}</tbody></table>:<p>No matching active categories.</p>}</CategoryBrowser></section>
+    {archived?<section aria-label="Archived category management"><CategoryBrowser status="archived">{items=><ul aria-label="Archived categories">{items.map(category=><li key={category.id}>{categoryName(category)}{' '}
       <button type="button" disabled={busy} onClick={()=>void change({action:'archive',id:category.id,revision:category.revision,archived:false})}>Restore</button></li>)}
-      {!archived.length&&<li>No archived categories.</li>}</ul>
-      :<button type="button" onClick={()=>void showArchived()}>Show archived categories</button>}
+      {!items.length&&<li>No matching archived categories.</li>}</ul>}</CategoryBrowser></section>
+      :<button type="button" onClick={()=>setArchived(true)}>Show archived categories</button>}
   </details>;
 }
 
-export function PortableKnowledge({email,view,categories}:{email:string;categories:PortableKnowledgeCategory[];view:{mode:'editor';initial?:Article;copy?:Copy}|{mode:'list';list:List;filters:Filters;paged:boolean}}){
+export function PortableKnowledge({email,view,categories,selectedCategory}:Categories&{email:string;view:{mode:'editor';initial?:Article;copy?:Copy}|{mode:'list';list:List;filters:Filters;paged:boolean}}){
   return <main className="portable-contacts">
     <PortableCrmHeader email={email} page="knowledge" currentHref={portableArticlePath}/>
-    <section>{view.mode==='editor'?<EditArticle initial={view.initial} copy={view.copy} categories={categories}/>:<ArticleList {...view} categories={categories}/>}</section>
+    <section>{view.mode==='editor'?<EditArticle selectedCategory={selectedCategory} initial={view.initial} copy={view.copy} categories={categories}/>:<ArticleList selectedCategory={selectedCategory} {...view} categories={categories}/>}</section>
   </main>;
 }

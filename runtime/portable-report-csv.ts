@@ -1,22 +1,20 @@
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {evaluatePortableReport,readPortableReports} from '../db/postgres/portable-report-store';
-import {portableReportExportGroupLimit,portableReportFilename,portableReportGroupLabels,
+import {portableReportHasFilters,portableReportMetricLabel,portableReportExportGroupLimit,portableReportFilename,portableReportGroupHeading,
   type PortableReportDefinition,type PortableReportExport,type PortableReportResult} from '../lib/portable-reports';
 import {exportCsvCell} from '../lib/shared-record-export';
 
 const headers={'cache-control':'private, no-store','x-content-type-options':'nosniff'};
 
 function reportCsv(definition:PortableReportDefinition,result:PortableReportResult){
-  const amount=definition.metric==='sum';
-  const heading=definition.groupBy?portableReportGroupLabels[definition.kind].label:'Group';
-  const columns=amount?[heading,'Total deal amount','Records']:[heading,'Record count'];
+  const includeCount=definition.metric!=='count';
+  const heading=portableReportGroupHeading(definition);
+  const columns=[heading,portableReportMetricLabel(definition.metric),...(includeCount?[definition.metric==='rate'?'Assessed tickets':definition.metric==='average'?'Answered tickets':'Records']:[])];
   const data=(label:string,value:string|null,count:string)=>[exportCsvCell(label),exportCsvCell(value,true),
-    ...(amount?[exportCsvCell(count,true)]:[])].join(',');
+    ...(includeCount?[exportCsvCell(count,true)]:[])].join(',');
   return [columns.map(column=>exportCsvCell(column)).join(','),
     ...result.rows.map(row=>data(row.label,row.value,row.count)),
-    data(definition.filter||definition.dealOutcome||definition.createdDateRange||definition.dealPipelineId||definition.taskDueDateRange||
-      definition.taskAssigneeId!==undefined||definition.ticketPriority||definition.ticketSource||definition.ticketCategory
-      ?'Matching records':'All records',result.total,result.count)].join('\r\n')+'\r\n';
+    data(portableReportHasFilters(definition)?'Matching records':'All records',result.total,result.count)].join('\r\n')+'\r\n';
 }
 
 async function evaluateSavedExport(db:PostgresJsDatabase,actorId:string,input:Extract<PortableReportExport,{id:string}>){

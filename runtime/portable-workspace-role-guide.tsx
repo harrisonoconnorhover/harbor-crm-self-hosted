@@ -1,10 +1,10 @@
 import {useId} from 'react';
-import type {WorkspacePermission,WorkspaceRole} from '../lib/portable-workspace-access';
+import type {WorkspacePermission} from '../lib/portable-workspace-access';
 import './portable-workspace-role-guide.css';
 
 const roleNames={owner:'Owner',backup:'Backup administrator',editor:'Editor',viewer:'Viewer'} as const;
 type GuideRole=keyof typeof roleNames;
-const roles=Object.keys(roleNames) as GuideRole[];
+export const guideRoles=Object.keys(roleNames) as GuideRole[];
 type Capability={label:string;hint?:string;access:Record<GuideRole,string>};
 
 const everyone={owner:'Yes',backup:'Yes',editor:'Yes',viewer:'Yes'};
@@ -14,6 +14,10 @@ const crm:Capability[]=[
   {label:'Edit shared records and complete tasks',access:{...everyone,viewer:'No'}},
   {label:'Merge duplicate contacts or companies',hint:'Editors need all four extra permissions for a Contact merge, or Company and deal activities for a Company merge.',
     access:{owner:'Yes',backup:'With required extras',editor:'With required extras',viewer:'No'}},
+  {label:'Read connected team mailboxes',hint:'Shared mailbox messages are visible to members with workspace-wide view access.',
+    access:{owner:'Yes',backup:'With full view access',editor:'With full view access',viewer:'With full view access'}},
+  {label:'Claim and reply to team email',hint:'The operator must connect a sender. Only the workspace owner can settle an uncertain delivery.',
+    access:{owner:'Yes',backup:'With full edit access',editor:'With full edit access',viewer:'No'}},
   {label:'Import records from CSV',access:ownerOnly},
   {label:'View saved dashboards',access:{owner:'All in workspace',backup:'Shared only',editor:'Shared only',viewer:'Shared only'}},
   {label:'Edit or share a dashboard',access:ownerOnly},
@@ -28,10 +32,10 @@ const team:Capability[]=[
 
 const extras={
   contactFiles:{action:'contact_files',label:'Contact files',accessible:'Share contact files',
-    hint:'Includes earlier versions on all contacts. Editors can upload and replace files.',
+    hint:'Teammates can find files on visible contacts and open earlier versions from a contact. Editors can upload or replace files on contacts they can edit.',
     owner:'Download, upload and replace',editor:'Download, upload and replace',viewer:'Download'},
   scheduledNotes:{action:'scheduled_notes',label:'Scheduled notes',accessible:'Share scheduled notes',
-    hint:'Editors can schedule notes on contacts. Cancel and retry controls are reserved for the owner.',
+    hint:'Teammates can read scheduled notes on contacts they can view. Editors can schedule them on contacts they can edit. Only the owner can cancel or retry.',
     owner:'View, schedule and manage',editor:'View and schedule',viewer:'View'},
   contactOutreach:{action:'contact_outreach',label:'Contact outreach',accessible:'Share logged Contact outreach',
     hint:'Includes the contact timeline. Editors can add, correct and remove manual logs.',
@@ -60,15 +64,15 @@ export function WorkspaceRoleGuide({initialRole,guideId}:{initialRole:GuideRole;
         {groups.map(group=><a key={group.id} href={'#'+guideId+'-'+group.id}>{group.title}</a>)}
       </nav>
       <fieldset className="portable-guide-chooser"><legend>Role to display</legend>
-        {roles.map(role=><label key={role}><input type="radio" id={guideId+'-'+role} name={chooser} defaultChecked={role===initialRole} value={role}/>{roleNames[role]}</label>)}
+        {guideRoles.map(role=><label key={role}><input type="radio" id={guideId+'-'+role} name={chooser} defaultChecked={role===initialRole} value={role}/>{roleNames[role]}</label>)}
       </fieldset>
       {groups.map(group=><table className="portable-role-matrix" key={group.title}>
         <caption id={guideId+'-'+group.id}>{group.title}{group.id==='extras'?' · off for new teammates':''}</caption>
-        <thead><tr><th scope="col">Capability</th>{roles.map(role=><th key={role} scope="col" data-column={role}>{roleNames[role]}</th>)}</tr></thead>
+        <thead><tr><th scope="col">Capability</th>{guideRoles.map(role=><th key={role} scope="col" data-column={role}>{roleNames[role]}</th>)}</tr></thead>
         <tbody>
           {group.rows.map(({label,hint,access})=><tr key={label}>
             <th scope="row">{label}{hint&&<small>{hint}</small>}</th>
-            {roles.map(role=><td key={role} data-column={role} data-answer={access[role]==='No'?'no':access[role]==='Yes'?'yes':undefined}>{access[role]}</td>)}
+            {guideRoles.map(role=><td key={role} data-column={role} data-answer={access[role]==='No'?'no':access[role]==='Yes'?'yes':undefined}>{access[role]}</td>)}
           </tr>)}
         </tbody>
       </table>)}
@@ -81,7 +85,7 @@ export function WorkspaceRoleGuide({initialRole,guideId}:{initialRole:GuideRole;
   </details>;
 }
 
-export function openRoleGuide(id:string,role:WorkspaceRole){
+export function openRoleGuide(id:string,role:GuideRole){
   const body=document.getElementById(id),guide=body?.closest('details');
   if(!body||!guide)return;
   guide.open=true;

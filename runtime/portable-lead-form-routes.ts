@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {enabledLeadForm,listLeadForms,manageLeadForm,readLeadInquiries,submitLeadInquiry} from '../db/postgres/lead-form-store';
 import {ApiError} from '../lib/api-error';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
-import {leadFormAutomationNote,portableInquiryFilter,portableInquirySearch,portableLeadFormAction} from '../lib/portable-lead-forms';
+import {leadFormAutomationNote,portableInquiryFilter,portableInquirySearch,portableLeadFormAction,portableLeadFormPayload} from '../lib/portable-lead-forms';
 import {leadFormEmbedOrigin} from '../lib/lead-form-embedding';
 import {portableMode} from './portable-config.mjs';
 import {leadFormSubmit,SupersededLeadFormError,supersededLeadFormCode} from '../lib/lead-forms';
@@ -15,6 +15,8 @@ import {digest} from '../lib/api-access';
 import {leadWebhookFingerprint,receiveLeadWebhook} from '../lib/lead-webhook';
 import {portableWorkspaceGuest} from './portable-identity';
 
+import {journeyPointer} from '../lib/portable-web-attribution';
+const publicSubmission=leadFormSubmit.extend({payload:portableLeadFormPayload,journey:z.unknown().optional()});
 const uuid=z.string().guid("Invalid uuid");
 const query=z.object({formId:uuid.optional(),afterAt:z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   afterId:uuid.optional(),filter:portableInquiryFilter.optional(),followUp:z.literal('open').optional(),
@@ -39,9 +41,9 @@ export async function manageForms(request:Request){
     if(request.method!=='POST'){
       if(params.size!==new Set(params.keys()).size)return json({error:'Invalid form query.'},400);
       const input=query.parse(Object.fromEntries(params));
-      if(input.formId||input.inquiries)return json(await readLeadInquiries(db,user.userId,input.formId,
-        input.afterAt!==undefined&&input.afterId?{at:input.afterAt,id:input.afterId}:undefined,
-        input.filter??(input.inquiries?'open':'all'),input.inquirySearch));
+      if(input.formId||input.inquiries)return json(await readLeadInquiries(db,user,{formId:input.formId,
+        cursor:input.afterAt!==undefined&&input.afterId?{at:input.afterAt,id:input.afterId}:undefined,
+        filter:input.filter??(input.inquiries?'open':'all'),inquirySearch:input.inquirySearch},request.method!=='HEAD'));
       if(params.has('inquirySearch'))return json({error:'Invalid form query.'},400);
       const forms=await listLeadForms(db,user.userId);
       return json({forms:input.followUp==='open'?forms.filter(form=>form.hasOpenInquiries):forms});
@@ -50,6 +52,8 @@ export async function manageForms(request:Request){
     const text=await readBoundedRequestText(request,32*1024);
     if(text===null)return json({error:'Form settings are too large.'},413);
     const input=portableLeadFormAction.parse(JSON.parse(text));
+    if(input.action==='save'&&input.definition.routeSalesLead&&input.definition.captureContacts!==true)
+      return json({error:'Enable automatic Contact capture before routing sales leads.'},400);
     if(input.action==='save'&&input.definition.queueWorkflows&&!leadFormAutomationNote(input.definition))
       return json({error:'Enable automatic Contact capture and enter the internal Note text.'},400);
     if(input.action==='save'&&input.definition.embedOrigin!==undefined){
@@ -70,14 +74,16 @@ export async function publicSubmit(request:Request,context:{params:Promise<{id:s
     if(!uuid.safeParse(id).success)return json({error:'Form unavailable.'},404);
     const text=await readBoundedRequestText(request,32*1024);
     if(text===null)return json({error:'This inquiry is too long. Shorten your message.'},413);
-    const input=leadFormSubmit.parse(JSON.parse(text));
+    const {journey,...input}=publicSubmission.parse(JSON.parse(text));
     const db=portableDb(),form=await enabledLeadForm(db,id);
     if(!form)return json({error:'Form unavailable.'},404);
     const denied=await portableRateLimit('public_form',id);
     if(denied)return denied;
     if(!input.website){
       const fingerprint=createHash('sha256').update(JSON.stringify([id,input.revision,input.payload])).digest('hex');
-      await submitLeadInquiry(db,id,form.workspaceId,input,fingerprint);
+      const pointer=journeyPointer.safeParse(journey);
+      const attribution=pointer.success&&request.headers.get('sec-gpc')!=='1'?{siteId:pointer.data.siteId,visitorToken:pointer.data.visitor}:undefined;
+      await submitLeadInquiry(db,id,form.workspaceId,input,fingerprint,undefined,attribution);
     }
     return json({accepted:true});
   }catch(error){

@@ -1,0 +1,17 @@
+.portable-report-chart .report-chart-switch { display:inline-flex; gap:.2rem; padding:.2rem; border:1px solid #d4e0de; border-radius:.55rem; margin-bottom:.6rem; }
+.portable-report-chart .report-chart-switch button { color:#375559; background:transparent; border:0; border-radius:.35rem; min-height:2rem; padding:.25rem .65rem; }
+.portable-report-chart .report-chart-switch [aria-pressed="true"] { background:#e2f0ed; color:#075e63; font-weight:650; }
+.portable-report-chart figure { margin:.3rem 0 1rem; }
+.portable-report-chart figcaption { font-weight:600; }
+.portable-report-chart ul { list-style:none; margin:.7rem 0; padding:0; }
+.portable-report-chart li { display:grid; grid-template-columns:minmax(4rem,1fr) minmax(3rem,2fr) auto; align-items:center; gap:.6rem; margin:.5rem 0; font-size:.875rem; overflow-wrap:anywhere; }
+.portable-report-chart .report-chart-label { border:0; background:none; color:#075e63; text-align:left; padding:0; min-height:1.75rem; }
+.portable-report-chart strong { font-variant-numeric:tabular-nums; }
+.report-chart-track { height:.6rem; border-radius:.25rem; position:relative; background:#eef3f2; }
+.report-chart-track i { position:absolute; height:100%; border-radius:.25rem; background:#14797a; }
+.report-chart-composition { display:flex; height:1rem; overflow:hidden; border-radius:.3rem; margin-block:.6rem; }
+.portable-report-chart li.report-chart-share { grid-template-columns:.7rem 1fr auto; }
+.report-chart-share > i { width:.7rem; height:.7rem; border-radius:.15rem; }
+.portable-report-settings { margin-block:.65rem 1rem; }
+.portable-report-settings > summary { width:fit-content; color:#075e63; font-weight:650; cursor:pointer; min-height:2rem; }
+.portable-report-library > summary { color:#075e63; font-weight:650; width:fit-content; cursor:pointer; }

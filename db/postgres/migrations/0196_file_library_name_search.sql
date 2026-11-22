@@ -1,0 +1,1 @@
+CREATE INDEX "contact_file_name_search" ON "contact_file_versions" USING gin ("name" public.gin_trgm_ops) WHERE "contact_file_versions"."revision" is not null;

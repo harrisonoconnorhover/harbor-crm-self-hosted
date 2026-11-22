@@ -1,0 +1,1 @@
+CREATE INDEX "portable_payments_received" ON "portable_invoice_payments" USING btree ("workspace_id",("data"->>'receivedOn'),"id");

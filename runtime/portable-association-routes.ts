@@ -25,7 +25,7 @@ async function associationRoute(request:Request){
     }
     const db=portableDb();
     if(!writing){
-      const page=await readPortableAssociations(db,user.userId,query.data);
+      const page=await readPortableAssociations(db,user,query.data,request.method==='GET');
       return page?json(page):json({error:'Record not found.'},404);
     }
     let body:unknown;
@@ -39,6 +39,7 @@ async function associationRoute(request:Request){
     if(result==='access')return json({error:'You no longer have edit access for this workspace. Refresh before trying again.'},403);
     if(result==='self')return json({error:'Choose a different record.'},400);
     if(result==='missing')return json({error:'Record not found.'},404);
+    if(result==='stale')return json({error:'This link changed. Review its current labels before editing again.'},409);
     if(result==='conflict')return json({error:'These records are already linked with different labels.'},409);
     return json({ok:true});
   }catch{return json({error:'Could not finish the association request. Try again.'},503);}

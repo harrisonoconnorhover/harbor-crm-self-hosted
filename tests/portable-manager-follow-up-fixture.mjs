@@ -89,7 +89,7 @@ export async function verifyPortableManagerFollowUp({request,headers,other,sql})
     await sql`DELETE FROM deal_pipeline_stages WHERE workspace_id=${source}`;
     await sql`DELETE FROM deal_pipelines WHERE workspace_id=${source}`;
     await sql`DELETE FROM portable_workspace_viewers WHERE workspace_id=${source}`;
-    await sql`DELETE FROM private_workspaces WHERE id IN ${sql(scopes)}`;
-    await sql`DELETE FROM login_identities WHERE id IN ${sql([managerId,foreignOwner])}`;
+    // The temporary database owns these workspaces and identities until teardown.
+    // Record access history keeps their foreign keys after team access is revoked.
   }
 }

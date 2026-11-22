@@ -18,25 +18,28 @@ import {activeContact} from './contact-visibility';
 import {dealEvents,deals} from './deal-schema';
 import {activeDeal} from './deal-visibility';
 import {lockRecordWorkspace} from './private-workspace-store';
-import {resolvePortableRecordOwner} from './workspace-assignee-store';
+import {ownedRecordScope} from './record-ownership-scope';
+import {hiddenStandardFields} from './standard-property-access';
+import {isRestrictableStandardField} from '../../lib/portable-standard-property-access';
+import {resolveCoreRecordOwner} from './workspace-assignee-store';
 import {captureWorkflowEntry} from './workflow-store';
 
 type Tx=Parameters<Parameters<PostgresJsDatabase['transaction']>[0]>[0];
-type Owner=Awaited<ReturnType<typeof resolvePortableRecordOwner>>;
+type Owner=Awaited<ReturnType<typeof resolveCoreRecordOwner>>;
 
 // All selected records change together or none do. Each changed record gains
 // an attributed revision, so an older editor can't restore the former owner.
 export function assignPortableRecordOwners(db:PostgresJsDatabase,actorId:string,input:PortableRecordOwnerBatch,
   shared?:SharedRecordWriteScope):Promise<PortableRecordOwnerResult>{
   return db.transaction(async tx=>{
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true,true);
     if(!workspaceId)return {error:shared?'access':'records_missing'};
-    const owner=await resolvePortableRecordOwner(tx,workspaceId,input.assigneeId);
+    const owner=await resolveCoreRecordOwner(tx,workspaceId,actorId,!!shared,input.kind,input.assigneeId,undefined,false);
     if(owner===false)return {error:'assignee_missing'};
     const requested=new Map(input.records.map(row=>[row.id,row.expectedRevision]));
     const ids=[...requested.keys()],now=new Date().toISOString();
     const write=input.kind==='contacts'?assignContacts:input.kind==='companies'?assignCompanies:assignDeals;
-    return write(tx,workspaceId,actorId,ids,requested,owner,now);
+    return write(tx,workspaceId,actorId,ids,requested,owner,now,!!shared);
   });
 }
 
@@ -52,8 +55,8 @@ const withOwner=<T extends {recordOwner?:unknown}>(data:T,owner:Owner):T=>{
   return owner?{...next,recordOwner:owner}:next;
 };
 
-async function assignContacts(tx:Tx,workspaceId:string,actorId:string,ids:string[],requested:Map<string,number>,owner:Owner,now:string){
-  const scope=and(eq(contacts.workspaceId,workspaceId),activeContact);
+async function assignContacts(tx:Tx,workspaceId:string,actorId:string,ids:string[],requested:Map<string,number>,owner:Owner,now:string,shared:boolean){
+  const scope=and(eq(contacts.workspaceId,workspaceId),activeContact,shared?ownedRecordScope(tx,actorId,workspaceId,contacts,'edit'):undefined);
   const result=changes(await tx.select().from(contacts).where(and(scope,inArray(contacts.id,ids))).for('update'),requested,owner);
   if(!('pending' in result))return result;
   for(const row of result.pending){
@@ -67,8 +70,8 @@ async function assignContacts(tx:Tx,workspaceId:string,actorId:string,ids:string
   return {changed:result.pending.length};
 }
 
-async function assignCompanies(tx:Tx,workspaceId:string,actorId:string,ids:string[],requested:Map<string,number>,owner:Owner,now:string){
-  const scope=and(eq(companies.workspaceId,workspaceId),activeCompany);
+async function assignCompanies(tx:Tx,workspaceId:string,actorId:string,ids:string[],requested:Map<string,number>,owner:Owner,now:string,shared:boolean){
+  const scope=and(eq(companies.workspaceId,workspaceId),activeCompany,shared?ownedRecordScope(tx,actorId,workspaceId,companies,'edit'):undefined);
   const result=changes(await tx.select().from(companies).where(and(scope,inArray(companies.id,ids))).for('update'),requested,owner);
   if(!('pending' in result))return result;
   for(const row of result.pending){
@@ -79,8 +82,8 @@ async function assignCompanies(tx:Tx,workspaceId:string,actorId:string,ids:strin
   return {changed:result.pending.length};
 }
 
-async function assignDeals(tx:Tx,workspaceId:string,actorId:string,ids:string[],requested:Map<string,number>,owner:Owner,now:string){
-  const scope=and(eq(deals.workspaceId,workspaceId),activeDeal);
+async function assignDeals(tx:Tx,workspaceId:string,actorId:string,ids:string[],requested:Map<string,number>,owner:Owner,now:string,shared:boolean){
+  const scope=and(eq(deals.workspaceId,workspaceId),activeDeal,shared?ownedRecordScope(tx,actorId,workspaceId,deals,'edit'):undefined);
   const result=changes(await tx.select().from(deals).where(and(scope,inArray(deals.id,ids))).for('update'),requested,owner);
   if(!('pending' in result))return result;
   for(const row of result.pending){
@@ -138,12 +141,16 @@ function customListValue(previous:unknown,mode:'append'|'remove',value:unknown){
 export function editPortableRecordProperty(db:PostgresJsDatabase,actorId:string,input:PortableRecordPropertyBatch,
   shared?:SharedRecordWriteScope):Promise<{changed:number}>{
   return db.transaction(async tx=>{
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true,true);
     if(!workspaceId)throw shared?new ApiError(403,'You no longer have edit access for this workspace. Refresh before trying again.'):
       new ApiError(404,'Some selected records are no longer available. Refresh and select again.');
     const {kind,field,mode}=input;
+    if(shared&&isRestrictableStandardField(kind,field)){
+      const hidden=await tx.execute<{id:string}>(hiddenStandardFields(workspaceId,kind,actorId));
+      if(hidden.some(row=>row.id===field))throw new ApiError(403,'You cannot edit this property.');
+    }
     const customId=field.startsWith('custom:')?field.slice(7):undefined;
-    const definition=customId?await readPortableCustomDefinition(tx,workspaceId,kind,customId):undefined;
+    const definition=customId?await readPortableCustomDefinition(tx,workspaceId,kind,customId,shared?actorId:undefined):undefined;
     // Deals can also move to a stage in another pipeline: value "<pipeline>/<stage>".
     const pipelineMove=kind==='deals'&&field==='pipeline';
     if(customId?!definition:!pipelineMove&&((portableBulkExcludedFields[kind] as readonly string[]).includes(field)||!Object.hasOwn(standardSchemas[kind].shape,field))){
@@ -159,7 +166,7 @@ export function editPortableRecordProperty(db:PostgresJsDatabase,actorId:string,
     const table={contacts,companies,deals}[kind],active={contacts:activeContact,companies:activeCompany,deals:activeDeal}[kind];
     const requested=new Map(input.records.map(row=>[row.id,row.expectedRevision]));
     const rows=await tx.select({id:table.id,revision:table.revision,data:table.data}).from(table)
-      .where(and(eq(table.workspaceId,workspaceId),active,inArray(table.id,[...requested.keys()]))).for('update');
+      .where(and(eq(table.workspaceId,workspaceId),active,shared?ownedRecordScope(tx,actorId,workspaceId,table,'edit'):undefined,inArray(table.id,[...requested.keys()]))).for('update');
     if(rows.length!==requested.size)throw new ApiError(404,'Some selected records are no longer available. Refresh and select again.');
     if(rows.some(row=>row.revision!==requested.get(row.id)))throw new ApiError(409,'Some selected records changed. Refresh and select again. No records were updated.');
     const placement=new Map<string,{pipelineId:string|null;stageId:string|null}>();

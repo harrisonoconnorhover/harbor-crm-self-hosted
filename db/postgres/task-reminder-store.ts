@@ -1,6 +1,8 @@
+import {canWorkTask} from './workspace-assignee-store';
 import {and,asc,desc,eq,exists,gt,isNotNull,isNull,lte,or,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {reminderPageSize,type TaskReminders} from '../../lib/portable-task-reminders';
+import {inactiveSequenceTask} from './sales-sequence-access';
 import {portableTasks as tasks} from './task-schema';
 import {privateWorkspaces as workspaces} from './workspace-schema';
 import {workspaceViewers} from './workspace-viewer-schema';
@@ -10,10 +12,10 @@ import {workspaceViewers} from './workspace-viewer-schema';
 function recipient(db:PostgresJsDatabase,actorId:string,workspaceId?:string){
   if(!workspaceId)return and(eq(workspaces.ownerId,actorId),or(isNull(tasks.assigneeId),eq(tasks.assigneeId,actorId)));
   const grant=db.select({id:workspaceViewers.id}).from(workspaceViewers).where(and(
-    eq(workspaceViewers.workspaceId,workspaces.id),eq(workspaceViewers.viewerId,actorId),eq(workspaceViewers.role,'editor')));
+    eq(workspaceViewers.workspaceId,workspaces.id),eq(workspaceViewers.viewerId,actorId),eq(workspaceViewers.role,'editor'),canWorkTask));
   return and(eq(workspaces.id,workspaceId),eq(tasks.assigneeId,actorId),exists(grant));
 }
-const openReminder=and(isNull(tasks.archivedAt),isNull(tasks.completedAt),isNotNull(tasks.reminderAt));
+const openReminder=and(isNull(tasks.archivedAt),isNull(tasks.completedAt),isNotNull(tasks.reminderAt),sql`NOT ${inactiveSequenceTask}`);
 
 export async function readTaskReminders(db:PostgresJsDatabase,actorId:string,workspaceId?:string):Promise<TaskReminders>{
   const now=new Date().toISOString();

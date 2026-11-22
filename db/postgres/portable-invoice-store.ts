@@ -1,3 +1,5 @@
+import {readCommerceResult,type RecordAccessActor} from './record-access-store';
+import {matchesCommerceSearch,invoiceSearchFields} from './commerce-search';
 import {and,asc,desc,eq,gt,gte,lt,lte,max,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {ApiError} from '../../lib/api-error';
@@ -40,17 +42,18 @@ function matchingInvoices(db:PostgresJsDatabase,actorId:string,input:PortableInv
       input.dealId?eq(invoices.dealId,input.dealId):undefined,input.quoteId?eq(invoices.quoteId,input.quoteId):undefined,
       input.status&&input.status!=='all'?sql`${status}=${input.status}`:undefined,
       input.dueFrom?gte(datedDueOn,input.dueFrom):undefined,input.dueThrough?lte(datedDueOn,input.dueThrough):undefined,
-      input.after?gt(invoices.id,input.after):undefined,input.q?sql`(strpos(lower(${title}),lower(${input.q}))>0 OR
-        strpos(lower(${buyer}),lower(${input.q}))>0 OR strpos(lower(${invoices.data}->>'reference'),lower(${input.q}))>0)`:undefined))
+      input.after?gt(invoices.id,input.after):undefined,matchesCommerceSearch(invoiceSearchFields(invoices.data),input.q)))
     .orderBy(asc(invoices.id)).limit(limit);
 }
 
-export async function listPortableInvoices(db:PostgresJsDatabase,actorId:string,input:PortableInvoiceList):Promise<PortableInvoicePage>{
-  const rows=await matchingInvoices(db,actorId,input,size+1);
-  const items=rows.slice(0,size).map(({id,title,buyer,totalCents,dueOn,status,number,paidCents}):PortableInvoicePage['items'][number]=>({
-    id,title,buyer,totalCents,dueOn,status,number,paidCents:paidCents??0,
-  }));
-  return {items,next:rows.length>size?items.at(-1)!.id:null};
+export async function listPortableInvoices(db:PostgresJsDatabase,actor:RecordAccessActor,includeBody:boolean,input:PortableInvoiceList):Promise<PortableInvoicePage>{
+  return readCommerceResult(db,actor,'invoices',includeBody&&'list',async tx=>{
+    const rows=await matchingInvoices(tx,actor.userId,input,size+1);
+    const items=rows.slice(0,size).map(({id,title,buyer,totalCents,dueOn,status,number,paidCents}):PortableInvoicePage['items'][number]=>({
+      id,title,buyer,totalCents,dueOn,status,number,paidCents:paidCents??0,
+    }));
+    return {items,next:rows.length>size?items.at(-1)!.id:null};
+  },result=>result.items.map(item=>item.id));
 }
 
 export async function listPortableInvoicesForExport(db:PostgresJsDatabase,actorId:string,filters:Omit<PortableInvoiceList,'after'>){
@@ -58,10 +61,18 @@ export async function listPortableInvoicesForExport(db:PostgresJsDatabase,actorI
   return rows.length>portableInvoiceExportLimit?null:rows;
 }
 
-export function readPortableInvoice(db:PostgresJsDatabase,actorId:string,id:string,before?:number,paymentsBefore?:number):Promise<PortableInvoiceDetail|null>{
-  return db.transaction(async tx=>{
+export async function merchantInvoice(db:PostgresJsDatabase,actorId:string,workspaceId:string,id:string){
+  const [row]=await db.select({id:invoices.id,revision:invoices.revision,totalCents:invoices.totalCents,paidCents:invoices.paidCents,
+    buyerEmail:sql<string>`${invoices.data}->'buyer'->>'email'`,finalizedAt:invoices.finalizedAt,voidReason:invoices.voidReason})
+    .from(invoices).innerJoin(workspaces,tenant)
+    .where(and(eq(workspaces.ownerId,actorId),eq(invoices.workspaceId,workspaceId),eq(invoices.id,id)));
+  return row;
+}
+
+export function readPortableInvoice(db:PostgresJsDatabase,actor:RecordAccessActor,includeBody:boolean,id:string,before?:number,paymentsBefore?:number):Promise<PortableInvoiceDetail|null>{
+  return readCommerceResult(db,actor,'invoices',includeBody&&'detail',async tx=>{
     const [row]=await tx.select({draft:fields,workspaceId:invoices.workspaceId}).from(invoices).innerJoin(workspaces,tenant)
-      .where(and(eq(workspaces.ownerId,actorId),eq(invoices.id,id)));
+      .where(and(eq(workspaces.ownerId,actor.userId),eq(invoices.id,id)));
     if(!row)return null;
     const invoice:Invoice={...row.draft,status:portableInvoiceState(row.draft.finalizedAt,row.draft.voidReason),paidCents:row.draft.paidCents??0};
     const history=await tx.select({revision:events.revision,action:events.action,at:events.at,note:events.note,actorName:loginIdentities.fullName})
@@ -71,7 +82,7 @@ export function readPortableInvoice(db:PostgresJsDatabase,actorId:string,id:stri
     const payments=await readPortableInvoicePayments(tx,row.workspaceId,id,size,paymentsBefore);
     return {invoice,history:history.slice(0,size),next:history.length>size?history[size-1].revision:null,
       payments:payments.items,nextPayment:payments.next};
-  },{isolationLevel:'repeatable read',accessMode:'read only'});
+  },result=>result?[result.invoice.id]:[]);
 }
 
 export function writePortableInvoice(db:PostgresJsDatabase,actor:InvoiceActor,input:PortableInvoiceWrite){

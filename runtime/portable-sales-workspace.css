@@ -1,0 +1,17 @@
+.portable-sales-summary > section { max-width: 86rem; }
+.portable-sales-summary nav[aria-label="Sales workspace views"] { display: flex; gap: 1.2rem; overflow-x: auto; border-bottom: 1px solid #dce4e3; }
+.portable-sales-summary nav[aria-label="Sales workspace views"] a { padding: .85rem .15rem; text-decoration: none; white-space: nowrap; }
+.portable-sales-summary nav[aria-label="Sales workspace views"] a[aria-current] { border-bottom: 3px solid #08636a; color: #075a60; font-weight: 650; }
+.sales-summary-date { display: flex; flex-wrap: wrap; gap: .35rem 1rem; align-items: baseline; justify-content: space-between; margin: 1.5rem 0 .8rem; }
+.sales-summary-date h2,.sales-summary-date p,.sales-summary-lists h3 { margin: 0; }
+.sales-summary-date p,.sales-summary-lists span { font-size: .875rem; color: #536967; }
+.sales-summary-counts { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(8.4rem,100%),1fr)); gap: .6rem; }
+.portable-sales-summary .sales-summary-counts a { display: grid; gap: .45rem; border: 1px solid #dbe4e2; border-radius: .65rem; padding: .85rem 1rem; text-decoration: none; }
+.portable-sales-summary .sales-summary-counts a:hover { background: #f1f8f6; border-color: #8aacaa; }
+.sales-summary-counts span { font-size: .875rem; }
+.sales-summary-counts strong { font-size: 1.65rem; color: #075a60; line-height: 1.2; }
+.sales-summary-lists { margin-top: 1.25rem; display: grid; grid-template-columns: repeat(auto-fit,minmax(min(18rem,100%),1fr)); gap: 1rem; }
+.sales-summary-lists section { border: 1px solid #dbe4e2; border-radius: .65rem; padding: 1rem; min-width: 0; }
+.sales-summary-lists ul { list-style: none; padding: 0; }
+.sales-summary-lists li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .2rem .65rem; padding: .65rem 0; border-bottom: 1px solid #e4eae9; overflow-wrap: anywhere; }
+.sales-summary-lists li a { color: #075a60; }

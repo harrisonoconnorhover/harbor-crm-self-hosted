@@ -1,3 +1,5 @@
+import {sharedToolAllowed} from './shared-tool-permission';
+import {requireMergeFieldAccess} from './record-property-access';
 import {and,count,eq,inArray,isNotNull,isNull,sql} from 'drizzle-orm';
 import type {AnyPgColumn} from 'drizzle-orm/pg-core';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
@@ -15,7 +17,7 @@ import {portableCustomProperties} from './custom-property-schema';
 import {dealEvents,deals} from './deal-schema';
 import {portableJobs as jobs} from './job-schema';
 import {leadFormNoteSources,leadInquiries} from './lead-form-schema';
-import {portableActivityRemovals} from './portable-activity-receipt-schema';
+import {portableActivityCreationReceipts,portableActivityRemovals} from './portable-activity-receipt-schema';
 import {portableAssociations as links} from './portable-association-schema';
 import {pendingContactWork} from './portable-contact-archive-store';
 import {portableFileLocations as fileLocations} from './portable-file-folder-schema';
@@ -98,8 +100,9 @@ const view=(row:typeof contacts.$inferSelect)=>({id:row.id,revision:row.revision
 
 export function previewPortableContactMerge(db:Db,actorId:string,input:{primaryId:string;secondaryId:string},shared?:SharedRecordWriteScope):Promise<PortableMergePreview>{
   return db.transaction(async tx=>{
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,mergePermissions);
-    if(!workspaceId)throw shared?new ApiError(403,accessError):new ApiError(404,notFound);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,mergePermissions,!!shared);
+    if(!workspaceId||!await sharedToolAllowed(tx,actorId,shared?.workspaceId,'duplicates','edit'))throw shared?new ApiError(403,accessError):new ApiError(404,notFound);
+    if(shared)await requireMergeFieldAccess(tx,workspaceId,'contacts',actorId);
     const {primary,secondary}=await pair(tx,workspaceId,input.primaryId,input.secondaryId,false);
     await guard(tx,workspaceId,primary.id,secondary.id);
     const fields=await mergeFields(tx,workspaceId);
@@ -119,7 +122,8 @@ export function previewPortableContactMerge(db:Db,actorId:string,input:{primaryI
 export function mergePortableContacts(db:Db,actorId:string,input:MergeInput,shared?:SharedRecordWriteScope):Promise<PortableMergeReceipt>{
   return db.transaction(async tx=>{
     const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,mergePermissions,true);
-    if(!workspaceId)throw shared?new ApiError(403,accessError):new ApiError(404,notFound);
+    if(!workspaceId||!await sharedToolAllowed(tx,actorId,shared?.workspaceId,'duplicates','edit'))throw shared?new ApiError(403,accessError):new ApiError(404,notFound);
+    if(shared)await requireMergeFieldAccess(tx,workspaceId,'contacts',actorId);
     const {primaryId,secondaryId,requestId}=input;
     const [previous]=await tx.select().from(receipts).where(and(eq(receipts.workspaceId,workspaceId),eq(receipts.requestId,requestId)));
     if(previous){
@@ -178,7 +182,7 @@ async function moveContactLinks(tx:Tx,workspaceId:string,actorId:string,primaryI
   const ticketRows=await tx.select().from(portableTickets).where(and(own(portableTickets),eq(portableTickets.contactId,secondaryId))).for('update');
   for(const row of ticketRows){
     const revision=row.revision+1;
-    const snapshot=(contactId:string)=>({data:row.data,contactId,companyId:row.companyId,closedAt:row.closedAt&&isoTime(row.closedAt)});
+    const snapshot=(contactId:string)=>({assigneeId:row.assigneeId,assigneeLabel:row.assigneeLabel,data:row.data,contactId,companyId:row.companyId,closedAt:row.closedAt&&isoTime(row.closedAt)});
     await tx.update(portableTickets).set({contactId:primaryId,revision,updatedAt:now}).where(and(own(portableTickets),eq(portableTickets.id,row.id)));
     await tx.insert(portableTicketEvents).values({workspaceId,ticketId:row.id,revision,actorId,
       previous:snapshot(secondaryId),data:snapshot(primaryId),occurredAt:now});
@@ -198,6 +202,8 @@ async function moveContactLinks(tx:Tx,workspaceId:string,actorId:string,primaryI
 
   moved.activities=(await tx.update(activities).set({contactId:primaryId})
     .where(and(own(activities),eq(activities.contactId,secondaryId))).returning({id:activities.id})).length;
+  await tx.update(portableActivityCreationReceipts).set({outlookContactId:primaryId}).where(and(own(portableActivityCreationReceipts),
+    eq(portableActivityCreationReceipts.outlookContactId,secondaryId),isNotNull(portableActivityCreationReceipts.outlookReceivedAt)));
   await tx.update(gmailLogs).set({contactId:primaryId}).where(and(own(gmailLogs),eq(gmailLogs.contactId,secondaryId)));
   await tx.update(portableActivityRemovals).set({recordId:primaryId}).where(and(own(portableActivityRemovals),
     eq(portableActivityRemovals.recordKind,'contacts'),eq(portableActivityRemovals.recordId,secondaryId)));

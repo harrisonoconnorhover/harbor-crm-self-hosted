@@ -34,8 +34,14 @@ export async function portableMigrationHistory(db,migrations){
   return {...comparePortableMigrationHistory(receipts,migrations),receipts};
 }
 
+// Respect a database administrator's configured wait. PostgreSQL's default zero waits forever.
+async function setMigrationLockWait(tx){
+  await tx`SELECT set_config('lock_timeout','5s',true) WHERE current_setting('lock_timeout')='0'`;
+}
+
 export async function applyPortableMigrations(db,migrations){
   const current=await db.begin('read only',async tx=>{
+    await setMigrationLockWait(tx);
     const [{locked}]=await tx`SELECT pg_try_advisory_xact_lock_shared(${portableMaintenanceLock}) AS locked`;
     if(!locked)return 'maintenance_in_progress';
     return (await portableMigrationHistory(tx,migrations)).status;
@@ -43,6 +49,7 @@ export async function applyPortableMigrations(db,migrations){
   if(current!=='migration_required')return current;
 
   return db.begin(async tx=>{
+    await setMigrationLockWait(tx);
     const [{locked}]=await tx`SELECT pg_try_advisory_xact_lock(${portableMaintenanceLock}) AS locked`;
     if(!locked)return 'maintenance_in_progress';
     const {status,applied}=await portableMigrationHistory(tx,migrations);

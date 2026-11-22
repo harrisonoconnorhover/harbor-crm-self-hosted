@@ -1,0 +1,5 @@
+ALTER TABLE "portable_lead_events" DROP CONSTRAINT "portable_lead_event_source";--> statement-breakpoint
+ALTER TABLE "portable_lead_events" ADD COLUMN "automatic_routing" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_leads" ADD COLUMN "routing_retry_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "portable_leads_routing_due" ON "portable_leads" USING btree ("routing_retry_at","workspace_id","id") WHERE "portable_leads"."routing_retry_at" IS NOT NULL AND "portable_leads"."archived_at" IS NULL AND "portable_leads"."assignee_id" IS NULL AND "portable_leads"."deal_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "portable_lead_events" ADD CONSTRAINT "portable_lead_event_source" CHECK (num_nonnulls("portable_lead_events"."actor_id","portable_lead_events"."intake_form_id") + "portable_lead_events"."automatic_routing"::integer = 1);

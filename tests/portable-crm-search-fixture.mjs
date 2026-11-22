@@ -35,6 +35,19 @@ export async function verifyPortableCrmSearch({request,origin,headers,other,sql,
     }
     assert.equal((await post({query:'x'.repeat(5000)})).status,400);
 
+    const special=String.raw`Référence_70%\west`;
+    await sql`UPDATE contacts SET data=data || ${sql.json({nested:[false,914326,[special,'bridgeOne','bridgeTwo','λ']]})}::jsonb
+      WHERE workspace_id=${workspaceId} AND id=${ids[0]}`;
+    for(const query of [special.toUpperCase(),'914326','λ']){
+      const hit=await (await post({query,kind:'contacts'})).json();
+      assert.ok(hit.results.some(row=>row.id===ids[0]),query);
+    }
+    for(const query of [special.replace('_','X'),special.replace('%','many'),special.replace('\\',''),'bridgeOne\nbridgeTwo']){
+      assert.equal((await (await post({query,kind:'contacts'})).json()).total,0,query);
+    }
+    await sql`UPDATE contacts SET data=data-'nested' WHERE workspace_id=${workspaceId} AND id=${ids[0]}`;
+    assert.equal((await (await post({query:special,kind:'contacts'})).json()).total,0);
+
     const response=await post({query:'  GLOBAL FIXTURE CAFÉ_%  '});
     assert.equal(response.status,200,await response.clone().text());
     assert.equal(response.headers.get('cache-control'),'private, no-store');

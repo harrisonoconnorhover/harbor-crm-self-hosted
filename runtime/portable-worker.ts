@@ -1,3 +1,4 @@
+import {workflowWebhookEventId} from '../lib/portable-workflow-paths';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import postgres from 'postgres';
@@ -5,12 +6,14 @@ import {drizzle} from 'drizzle-orm/postgres-js';
 import {beginExternalDispatch,claimPortableJob,finishExternalDispatch,finishNote,jobClock,portableQueueStatus,recoverExpiredJob,
   portableFullWorkerStatus,portableGmailQueueStatus,portableTaskQueueStatus,rejectUnavailableAction,retryUnstartedJob,heartbeatIntervalMs,recordPortableWorkerHeartbeat,
   type WorkerPollCapability} from '../db/postgres/job-store';
+import {retryWaitingLead} from '../db/postgres/portable-lead-store';
 import {scanPortableSegmentWorkflow} from '../db/postgres/portable-segment-workflow-store';
 import {promotePortableFormNote} from '../db/postgres/lead-form-note-worker-store';
 import {portableSegmentScanStatus} from '../db/postgres/portable-segment-scan-status';
 import {portableFormNoteStatus,portableInquiryFollowUpStatus} from '../db/postgres/lead-form-note-status';
 import {portableCalendarReceiptStatus} from '../db/postgres/portable-meeting-store';
 import {advanceOverduePortableTask} from '../db/postgres/task-repeat-store';
+import {runSalesSequencePass} from '../db/postgres/sales-sequence-processor';
 import {finishTask} from '../db/postgres/task-job-store';
 import {portableTaskRepeatStatus} from '../db/postgres/task-repeat-status';
 import {portableWorkflowCapacityStatus} from '../db/postgres/workflow-capacity-status';
@@ -18,6 +21,9 @@ import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {portableDatabaseUrl,portableMaintenanceLock,portableMode,portableWebAddress} from './portable-config.mjs';
 import {portableMigrationHistory,readPortableMigrations} from './portable-migrations.mjs';
 import {runPortableGmailJob} from './portable-gmail-worker';
+import {beginWorkflowWebhookDispatch,finishWorkflowWebhookDispatch} from '../db/postgres/workflow-webhook-job-store';
+import {webhookDestinations} from './portable-webhook-config';
+import {deliverSignedWebhook,runPortableWebhookPass} from './portable-webhook-dispatch';
 import {portableGmailConfig} from './portable-gmail-config';
 import {portableCodeAvailable} from './portable-code-config';
 import {portableDb} from './portable-db';
@@ -129,9 +135,10 @@ export async function checkPortableWeb(configuredOrigin:string|undefined,mode:'l
 export async function runPortableJobPass(db:ReturnType<typeof portableDb>,dispatch?:Dispatch,within:Deadline=operation=>operation(),
   signal?:AbortSignal,notesOnly=false,capabilities=workerCapabilities(notesOnly),onPoll?:(at:number)=>void){
   if(signal?.aborted)return false;
+  const webhooks=!notesOnly&&process.env.HARBOR_WEBHOOK_DELIVERY_ENABLED==='true';
   const {recovered,startedAt,job}=await within(async()=>{
     const {recovered,startedAt}=await recoverExpiredJob(db,notesOnly);
-    const job=signal?.aborted?null:await claimPortableJob(db,{notesOnly,code:capabilities.javascriptActions,gmail:capabilities.scheduledGmailConfigured});
+    const job=signal?.aborted?null:await claimPortableJob(db,{notesOnly,webhooks,code:capabilities.javascriptActions,gmail:capabilities.scheduledGmailConfigured});
     return {recovered,startedAt,job};
   },databaseDeadlineMs);
   if(!job){
@@ -160,6 +167,20 @@ export async function runPortableJobPass(db:ReturnType<typeof portableDb>,dispat
         }else if(job.kind==='code'){
           const {runPortableCodeJob}=await import('./portable-code-worker');
           await runPortableCodeJob(db,job,new URL('./code-sandbox.mjs',import.meta.url));
+        }else if(job.workflowWebhook){
+          const source=job.workflowWebhook;
+          const destination=webhookDestinations().find(d=>d.workspaceId===job.workspaceId&&d.name===source.destination);
+          const started=performance.now();
+          if(await beginWorkflowWebhookDispatch(db,job,!!destination)&&destination){
+            const receipt=signal?.aborted||performance.now()-started>8_000?
+              {status:'uncertain' as const,httpStatus:null,delay:0}:await deliverSignedWebhook({
+                type:'workflow.action',id:workflowWebhookEventId(job.workspaceId,job.id),jobId:job.id,workspaceId:job.workspaceId,workflowId:source.workflowId,
+                workflowRevision:source.workflowRevision,pathId:source.pathId,object:source.objectKind,
+                recordId:source.recordId,revision:source.recordRevision,contactId:job.contactId,
+                occurredAt:new Date(job.createdAt).toISOString(),
+              },job.attempts,destination,signal);
+            await finishWorkflowWebhookDispatch(db,job,receipt);
+          }
         }else if(!dispatch){
           await rejectUnavailableAction(db,job);
         }else if(await beginExternalDispatch(db,job)){
@@ -174,7 +195,7 @@ export async function runPortableJobPass(db:ReturnType<typeof portableDb>,dispat
         // This only changes a still-live running claim. Dispatching work is never retried here.
         await retryUnstartedJob(db,job,reportFailure(error));
       }
-    },job.kind==='gmail'?gmailActionDeadlineMs:internalActionDeadlineMs);
+    },job.kind==='gmail'?gmailActionDeadlineMs:job.workflowWebhook?20_000:internalActionDeadlineMs);
   }catch(error){
     reportFailure(signal?.reason instanceof PortableWorkerSessionLost?signal.reason:error);
     throw error;
@@ -281,7 +302,35 @@ export async function runPortableWorker(once:boolean,onFirstPoll?:(capabilities:
           }
         }
         if(stop.signal.aborted)break;
+        if(!notesOnly&&process.env.HARBOR_SEQUENCE_WORKER_ENABLED==='true'){
+          try{await within(()=>runSalesSequencePass(db),databaseDeadlineMs);}
+          catch{
+            if(once)throw Error('Portable sequence pass unavailable.');
+            if(!connectionLost)console.error('Portable sequence pass unavailable.');
+          }
+        }
+        if(stop.signal.aborted)break;
         await runPortableJobPass(db,undefined,within,stop.signal,notesOnly,capabilities,once?undefined:recordPoll);
+        if(!notesOnly&&!stop.signal.aborted&&process.env.HARBOR_LEAD_ROUTING_RETRY_ENABLED==='true'){
+          try{
+            // Release the workspace lock between leads and yield to the other queues on busy passes.
+            const routingUntil=performance.now()+250;
+            for(let i=0;i<8&&!stop.signal.aborted&&performance.now()<routingUntil;i++){
+              if(!await within(()=>retryWaitingLead(db),databaseDeadlineMs))break;
+            }
+          }
+          catch{
+            if(once)throw Error('Portable lead routing retry unavailable.');
+            if(!connectionLost)console.error('Portable lead routing retry unavailable.');
+          }
+        }
+        if(!notesOnly&&!stop.signal.aborted&&process.env.HARBOR_WEBHOOK_DELIVERY_ENABLED==='true'){
+          try{await within(()=>runPortableWebhookPass(client,stop.signal),20_000);}
+          catch{
+            if(once)throw Error('Portable webhook pass unavailable.');
+            if(!connectionLost)console.error('Portable webhook pass unavailable.');
+          }
+        }
       }catch{
         if(once&&!connectionLost)throw Error('Portable worker could not reach its job store.');
         if(!connectionLost)console.error('Portable worker job store unavailable.');

@@ -1,0 +1,18 @@
+#portable-property-history { scroll-margin-top: calc(var(--portable-topbar-height, 0px) + 12px); }
+.portable-history-filters, .portable-contacts .portable-history-filters form {
+  display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px;
+}
+.portable-history-filters { margin-block: 12px; }
+.portable-contacts .portable-history-filters form { margin: 0; padding: 0; border: 0; }
+.portable-history-filters :is(label, form, input, select) { min-inline-size: 0; max-inline-size: 100%; }
+.portable-history-filters label { font-size: .875rem; font-weight: 600; }
+.portable-history-entries { margin: 0; padding: 0; list-style: none; }
+.portable-history-entries li {
+  display: grid; gap: 3px; padding-block: 10px; border-top: 1px solid #dde5e4; overflow-wrap: anywhere;
+}
+.portable-contacts .portable-history-entries button {
+  justify-self: start; max-inline-size: 100%; border: 0; padding: 2px 0; text-align: start;
+  background: transparent; color: #075e63; font-weight: 650; overflow-wrap: anywhere;
+}
+.portable-contacts .portable-history-entries button:hover { text-decoration: underline; }
+.portable-history-entries small { color: #52676a; }

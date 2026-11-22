@@ -29,7 +29,7 @@ export async function POST(request:Request){
         const csv=mapPortablePairedCsv(input.csv);
         return json({columns:csv.headers.map((header,index)=>({header,target:csv.mapping[index]}))});
       }
-      if(input.action==='preview')return json(await previewPortablePairedImport(db,user.userId,input.csv,input.mapping));
+      if(input.action==='preview')return json(await previewPortablePairedImport(db,user,input.csv,input.mapping));
       const committed=await commitPortablePairedImport(db,user.userId,input);
       return json(committed.result,committed.replayed?200:201);
     }
@@ -39,7 +39,7 @@ export async function POST(request:Request){
       return json({columns:csv.headers.map((header,index)=>({header,target:csv.mapping[index]}))});
     }
     const sourceHash=await sha256(input.csv);
-    if(input.action==='preview')return json(await previewPortableRecordImport(db,user.userId,input.kind,sourceHash,input.csv,input.mapping,input.reviewMatches));
+    if(input.action==='preview')return json(await previewPortableRecordImport(db,user,input.kind,sourceHash,input.csv,input.mapping,input.reviewMatches));
     const committed=await commitPortableRecordImport(db,user.userId,{...input,kind:input.kind},sourceHash);
     return json(committed.result,committed.replayed?200:201);
   }catch(error){

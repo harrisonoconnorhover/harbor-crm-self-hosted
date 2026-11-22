@@ -1,9 +1,11 @@
 'use client';
 
 import {useEffect,useState} from 'react';
+import {downloadBooking} from '@/lib/calendar/booking-file';
 import type {GuestBookingStatus} from '@/lib/calendar/guest-booking-status';
 
 const notices:Record<GuestBookingStatus['state'],string>={
+  reserved:'Your team meeting is booked in Harbor.',
   pending:'Your request is awaiting the organizer’s confirmation.',
   confirmed:'Your meeting is confirmed. Check your email for the Calendar invitation.',
   checking:'The organizer is checking the Calendar outcome.',
@@ -43,6 +45,9 @@ export function BookingStatus({receipt}:{receipt?:string}){
   return <section aria-label="Booking status">
     {error?<p role="alert">{error}</p>:<p role="status">{status?notices[status.state]:'Checking booking status…'}</p>}
     {time&&!error&&<p><time dateTime={status?.start}>{time}</time> in your time zone.</p>}
+    {!error&&status?.calendar&&status.start&&status.end&&<button type="button" onClick={()=>{
+      if(status.calendar&&status.start&&status.end)downloadBooking(status.calendar.id,status.calendar.title,status.start,status.end);
+    }}>Download calendar file</button>}
     <button type="button" disabled={waiting} onClick={()=>setCheck(value=>value+1)}>
       {waiting?'Checking…':'Refresh status'}
     </button>

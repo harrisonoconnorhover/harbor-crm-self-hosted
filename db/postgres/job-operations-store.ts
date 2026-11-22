@@ -3,16 +3,17 @@ import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {JobKind,QueueIssue,QueueView} from '../../lib/portable-job-labels';
 import {contacts,privateWorkspaces} from './contact-schema';
 import {deals} from './deal-schema';
+import {portableTickets as tickets} from './ticket-schema';
 import {portableJobs as jobs,portableWorkerHeartbeat as heartbeat} from './job-schema';
 import {loginIdentities} from './identity-schema';
 import {scheduledGmail} from './scheduled-gmail-schema';
 import {sequenceJobExists} from './manual-workflow-action-store';
-import {canCancelJob,canRetryInternalJob,canReviewFailed,canReviewGmail,isSuppressedGmail,isUncertainExternal,isUncertainGmail,jobAttemptReceipts,jobNeedsReview,jobOverdueAt,jobReviewFilters,queuedGmailRecipientBlocked,workerHeartbeatState,workerPollState} from './job-store';
+import {canCancelJob,canRetryInternalJob,canReviewFailed,canReviewGmail,isSuppressedGmail,isUncertainExternal,isUncertainGmail,jobAttemptReceipts,jobNeedsReview,jobOverdueAt,jobReviewFilters,queuedGmailRecipientBlocked,runnableQueuedJob,workerHeartbeatState,workerPollState} from './job-store';
 import {gmailSendGraceMs,portableGmailMessageId} from './scheduled-gmail-store';
 import {activeTask,pendingTaskRepeat,portableTaskRepeatReceipts as taskReceipts,portableTasks as tasks,taskRepeatDueAt} from './task-schema';
 import {taskRepeatOverdueSeconds} from './task-repeat-status';
 import {workflowCapacityNeedsReview} from './workflow-capacity-status';
-import {dealWorkflowRuns as runs} from './workflow-schema';
+import {dealWorkflowRuns as runs,workflowPathSteps as steps} from './workflow-schema';
 
 export type {QueueView} from '../../lib/portable-job-labels';
 type Cursor={at:number;id:string};
@@ -28,6 +29,7 @@ const overdue=jobOverdueAt(queryTime);
 const expiredClaim=sql<boolean>`${jobs.status} IN ('running','dispatching') AND ${jobs.leaseUntil}<=${queryTime}`;
 const viewFilter={
   issues:or(jobNeedsReview,overdue,expiredClaim),
+  waiting:sql`${jobs.status}='queued' AND ${jobs.waitForLifecycle} IS NOT NULL`,
   pending:sql`${jobs.status} IN ('queued','running','dispatching')`,
   completed:eq(jobs.status,'succeeded'),
   failed:eq(jobs.status,'failed'),
@@ -39,6 +41,8 @@ const issueFilter={overdue,expired_claim:expiredClaim,needs_review:jobNeedsRevie
 const pageSize=25;
 
 export async function readOwnerQueue(db:PostgresJsDatabase,ownerId:string,view:QueueView,{after,jobId,kind,issue,finishedFirst,contactId}:QueueFilters={}){
+  const sourceJob=sql`coalesce((SELECT ${steps.runId} FROM ${steps}
+    WHERE ${steps.workspaceId}=${jobs.workspaceId} AND ${steps.plannedJobId}=${jobs.id} AND ${steps.jobId}=${jobs.id}),${jobs.id})`;
   const byFinish=view==='completed'&&finishedFirst;
   const orderedAt=byFinish?sql`coalesce(${jobs.finishedAt},${jobs.createdAt})`:jobs.createdAt;
   const ownerHasJob=(filter:SQL)=>jobId?sql`FALSE`:sql`
@@ -49,7 +53,7 @@ export async function readOwnerQueue(db:PostgresJsDatabase,ownerId:string,view:Q
       id:jobs.id,workspaceId:jobs.workspaceId,contactId:jobs.contactId,contactName:sql<string>`${contacts.data}->>'name'`,
       contactArchived:sql<boolean>`${contacts.archivedAt} IS NOT NULL`,
       kind:jobs.kind,status:jobs.status,attempts:jobs.attempts,issue:jobs.issue,createdAt:jobs.createdAt,
-      scheduledFor:jobs.scheduledFor,availableAt:jobs.availableAt,finishedAt:jobs.finishedAt,
+      waitForLifecycle:jobs.waitForLifecycle,scheduledFor:jobs.scheduledFor,availableAt:jobs.availableAt,finishedAt:jobs.finishedAt,
       operatorRetryAt:jobs.operatorRetryAt,operatorReviewedAt:jobs.operatorReviewedAt,actorId:jobs.actorId,authorizedOwnerId:jobs.authorizedOwnerId,
       actorEmail:loginIdentities.email,
       hasCreatedTask:sql<boolean>`CASE WHEN ${jobs.kind}='task' AND ${jobs.status}='succeeded' THEN EXISTS(
@@ -63,7 +67,13 @@ export async function readOwnerQueue(db:PostgresJsDatabase,ownerId:string,view:Q
           'dealArchived',${deals.archivedAt} IS NOT NULL,'workflowName',${runs.workflowName})
         FROM ${runs} JOIN ${deals}
           ON ${deals.workspaceId}=${runs.workspaceId} AND ${deals.id}=${runs.dealId}
-        WHERE ${runs.workspaceId}=${jobs.workspaceId} AND ${runs.id}=${jobs.id} AND ${runs.jobId}=${jobs.id}
+        WHERE ${runs.workspaceId}=${jobs.workspaceId} AND ${runs.id}=${sourceJob} AND ${runs.jobId}=${runs.id}
+      )`:sql<null>`NULL`,
+      sourceTicketWorkflow:jobId?sql<{ticketId:string;ticketName:string;archived:boolean;workflowId:string;workflowName:string}|null>`(
+        SELECT jsonb_build_object('ticketId',${tickets.id},'ticketName',${tickets.data}->>'name',
+          'archived',${tickets.archivedAt} IS NOT NULL,'workflowId',${runs.workflowId},'workflowName',${runs.workflowName})
+        FROM ${runs} JOIN ${tickets} ON ${tickets.workspaceId}=${runs.workspaceId} AND ${tickets.id}=${runs.ticketId}
+        WHERE ${runs.workspaceId}=${jobs.workspaceId} AND ${runs.id}=${sourceJob} AND ${runs.jobId}=${runs.id}
       )`:sql<null>`NULL`,
       leaseUntil:jobs.leaseUntil,overdue,expiredClaim,receipts:jobAttemptReceipts,sequence:exists(sequenceJobExists(db,jobs.workspaceId,jobs.id)).mapWith(Boolean),
       recipientBlocked:queuedGmailRecipientBlocked,
@@ -88,13 +98,13 @@ export async function readOwnerQueue(db:PostgresJsDatabase,ownerId:string,view:Q
         beat.last_full_poll_at::float8 AS last_full_poll_at,
         beat.last_gmail_poll_at::float8 AS last_gmail_poll_at,
         (SELECT ${jobs.availableAt}::float8 FROM ${privateWorkspaces} JOIN ${jobs} ON ${jobs.workspaceId}=${privateWorkspaces.id}
-          WHERE ${privateWorkspaces.ownerId}=${ownerId} AND ${jobs.status}='queued' AND ${jobs.kind}='gmail'
+          WHERE ${privateWorkspaces.ownerId}=${ownerId} AND ${runnableQueuedJob} AND ${jobs.kind}='gmail'
           ORDER BY ${jobs.availableAt} LIMIT 1) AS next_mail_at,
         EXISTS (SELECT 1 FROM ${privateWorkspaces} JOIN ${jobs} ON ${jobs.workspaceId}=${privateWorkspaces.id}
-          WHERE ${privateWorkspaces.ownerId}=${ownerId} AND ${jobs.status}='queued'
+          WHERE ${privateWorkspaces.ownerId}=${ownerId} AND ${runnableQueuedJob}
             AND ${jobs.kind}='note' AND ${jobs.availableAt}<=at) AS due_note,
         EXISTS (SELECT 1 FROM ${privateWorkspaces} JOIN ${jobs} ON ${jobs.workspaceId}=${privateWorkspaces.id}
-          WHERE ${privateWorkspaces.ownerId}=${ownerId} AND ${jobs.status}='queued'
+          WHERE ${privateWorkspaces.ownerId}=${ownerId} AND ${runnableQueuedJob}
             AND ${jobs.kind}='task' AND ${jobs.availableAt}<=at) AS due_task,
         EXISTS (SELECT 1 FROM ${privateWorkspaces} JOIN ${tasks} ON ${tasks.workspaceId}=${privateWorkspaces.id}
           WHERE ${privateWorkspaces.ownerId}=${ownerId} AND ${pendingTaskRepeat(tasks.data,tasks.completedAt,tasks.archivedAt)}

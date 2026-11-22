@@ -1,11 +1,12 @@
-import {and,desc,eq,isNotNull,isNull,lt,sql} from 'drizzle-orm';
+import {and,desc,eq,isNotNull,isNull,lt,sql,type SQL} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {z} from 'zod';
 import {ApiError} from '../../lib/api-error';
 import {foldArticleText,normalizeArticleHtml,sameArticleContent,type ArticleContent,type ArticleVersionAction,type articleMutation} from '../../lib/knowledge-base';
 import type {portableArticleList} from '../../lib/portable-knowledge';
-import {knowledgeArticles as articles,knowledgeCategories,knowledgeVersions as versions} from './knowledge-schema';
+import {articlePublications,knowledgeArticles as articles,knowledgeCategories,knowledgeVersions as versions} from './knowledge-schema';
 import {requireActiveKnowledgeCategory} from './knowledge-category-store';
+import {literalSearchPattern} from './search-index';
 import {lockRecordWorkspace} from './private-workspace-store';
 import {privateWorkspaces as workspaces} from './workspace-schema';
 
@@ -24,21 +25,36 @@ const conflict=()=>new ApiError(409,'This article changed or was archived. Reloa
 
 export async function listPortableArticles(db:PostgresJsDatabase,actorId:string,input:z.infer<typeof portableArticleList>){
   const q=foldArticleText(input.q);
-  const rows=await db.select({
+  const terms=input.match==='words'?[...new Set(q.split(' '))].sort((a,b)=>b.length-a.length):[q];
+  const [pattern,...otherPatterns]=terms.map(literalSearchPattern);
+  const workspace=sql`(SELECT id FROM ${workspaces} WHERE owner_id=${actorId})`;
+  const categoryId=sql`${articles.content}->>'categoryId'`;
+  // Older entries can carry a free-text label. Only a canonical ID matched the old text join.
+  const categoryUuid=sql`CASE WHEN ${categoryId} ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    THEN (${categoryId})::uuid END`;
+  const articleText=sql`(${articles.searchText} COLLATE "C")`;
+  const inText=sql`${articleText} LIKE ${pattern}`;
+  const inCategory=sql`${categoryId}=ANY(ARRAY(
+    SELECT c.id::text FROM ${knowledgeCategories} c WHERE c.workspace_id=${workspace}
+      AND (c.name_key COLLATE "C") LIKE ${pattern}))`;
+  const allOtherWords=otherPatterns.length?sql`NOT EXISTS (SELECT FROM unnest(${sql.param(otherPatterns)}::text[]) AS word(pattern)
+    WHERE ${articleText} NOT LIKE word.pattern AND (coalesce(${knowledgeCategories.nameKey},'') COLLATE "C") NOT LIKE word.pattern)`:undefined;
+  const page=(source?:SQL)=>db.select({
     id:articles.id,title:sql<string>`${articles.content}->>'title'`,
-    category:sql<string>`coalesce((SELECT c.name FROM ${knowledgeCategories} c WHERE c.workspace_id=${articles.workspaceId}
-      AND c.id::text=${articles.content}->>'categoryId'),${articles.content}->>'category')`,
-    categoryId:sql<string|null>`${articles.content}->>'categoryId'`,excerpt:articles.excerpt,
+    category:sql<string>`coalesce(${knowledgeCategories.name},${articles.content}->>'category')`,
+    categoryId:sql<string|null>`${categoryId}`,excerpt:articles.excerpt,
     updatedAt:articles.updatedAt,archivedAt:articles.archivedAt,
-  }).from(articles).innerJoin(workspaces,eq(articles.workspaceId,workspaces.id))
-    .where(and(eq(workspaces.ownerId,actorId),
+  }).from(articles).leftJoin(knowledgeCategories,and(eq(knowledgeCategories.workspaceId,articles.workspaceId),
+    eq(knowledgeCategories.id,categoryUuid)))
+    .where(and(eq(articles.workspaceId,workspace),source,allOtherWords,
       input.status==='draft'?isNull(articles.archivedAt):input.status==='archived'?isNotNull(articles.archivedAt):undefined,
-      // A managed category matches by its current name, so a rename is searchable at once.
-      q?sql`(strpos(${articles.searchText},${q}) > 0 OR EXISTS(SELECT 1 FROM ${knowledgeCategories} c WHERE c.workspace_id=${articles.workspaceId}
-        AND c.id::text=${articles.content}->>'categoryId' AND strpos(c.name_key,${q}) > 0))`:undefined,
-      input.categoryId?sql`${articles.content}->>'categoryId'=${input.categoryId}::text`:undefined,
+      input.categoryId?sql`${categoryId}=${input.categoryId}::text`:undefined,
       input.afterAt!==undefined?sql`(${articles.updatedAt}, ${articles.id}) < (${input.afterAt}, ${input.afterId})`:undefined))
     .orderBy(desc(articles.updatedAt),desc(articles.id)).limit(pageSize+1);
+  // Each index supplies at most one page to the final sort. An article matching both
+  // the text and its current category belongs only to the text branch.
+  const rows=q?await page(inText).unionAll(page(and(inCategory,sql`NOT (${inText})`)))
+    .orderBy(desc(articles.updatedAt),desc(articles.id)).limit(pageSize+1):await page();
   const items=rows.slice(0,pageSize),last=items.at(-1);
   return {items,next:rows.length>pageSize&&last?{afterAt:last.updatedAt,afterId:last.id}:null};
 }
@@ -134,6 +150,10 @@ export async function mutatePortableArticle(db:PostgresJsDatabase,actorId:string
       }).where(and(scope,eq(articles.revision,input.revision))).returning();
     }
     if(!item)throw conflict();
+    if(input.action==='archive'&&input.archived){
+      await tx.update(articlePublications).set({publishedRevision:null,topic:null,searchText:'',revision:sql`${articlePublications.revision}+1`})
+        .where(and(eq(articlePublications.workspaceId,workspaceId),eq(articlePublications.articleId,item.id),isNotNull(articlePublications.publishedRevision)));
+    }
     await tx.insert(versions).values({
       workspaceId,articleId:item.id,revision:item.revision,content:item.content,
       action,sourceRevision,savedAt:item.updatedAt,archivedAt:item.archivedAt,changedById:actorId,

@@ -1,3 +1,4 @@
+import {seedEquipmentImport,verifyRestoredEquipmentImport} from './portable-equipment-recovery-fixture.mjs';
 import {seedPortablePilot,verifyRestoredPortablePilot,verifyRestoredPilotSharing} from './portable-pilot-fixture.mjs';
 import {verifyRestoredPortableTaskRepeats} from './portable-task-repeats-fixture.mjs';
 import {verifyRestoredPortableContactArchive} from './portable-contact-archive-fixture.mjs';
@@ -684,7 +685,7 @@ export async function verifyPortableRailwayRollback({env,directory,mock,signIn,c
   }finally{await targetSql.end();}
 }
 
-export async function verifyPortableRecoveryJourney({env,mock,request,headers,sql,directory,signIn,fixture}){
+export async function verifyPortableRecoveryJourney({env,mock,request,headers,sql,directory,signIn,fixture,restart}){
   const target=new URL(process.env.HARBOR_TEST_RESTORE_POSTGRES_URL);
   assert.equal(target.hostname,'127.0.0.1');
   assert.match(target.pathname,/^\/harbor_restore_test(?:_[a-z0-9]+)?$/);
@@ -726,6 +727,124 @@ export async function verifyPortableRecoveryJourney({env,mock,request,headers,sq
       FROM login_sessions WHERE user_id=${actorId} LIMIT 1 RETURNING state_hash`;
     assert.equal(attempts.length,1);
     const pilot=await seedPortablePilot({request,origin:env.HARBOR_LOGIN_ORIGIN,headers,actorId});
+    const inboxId=randomUUID(),replyId=randomUUID();
+    const [{id:inboxWorkspace}]=await sql`SELECT id FROM private_workspaces WHERE owner_id=${actorId}`;
+    await sql`INSERT INTO portable_inbox_conversations (workspace_id,id,mailbox,sender,subject,claimed_by)
+      VALUES (${inboxWorkspace},${inboxId},'support@example.test','visitor@example.test','Fictional scanner repair',${actorId})`;
+    await sql`INSERT INTO portable_inbox_messages (workspace_id,conversation_id,id,mailbox,direction,state,actor_id,body,internet_id)
+      VALUES (${inboxWorkspace},${inboxId},${replyId},'support@example.test','outgoing','sending',${actorId},'Fictional repair instructions','<repair@example.test>')`;
+    const articleId=randomUUID();
+    async function writeRecord(path,body){
+      const r=await request(path,{method:'POST',headers:{...headers,origin:env.HARBOR_LOGIN_ORIGIN,'content-type':'application/json'},body:JSON.stringify(body)});
+      assert.ok(r.ok,await r.clone().text());
+      return r.json();
+    }
+    const {record:waitingContact}=await writeRecord('/api/crm',{action:'save',kind:'contacts',
+      data:{name:'Fictional lifecycle handoff',lifecycle:'Lead'}});
+    const waitingWorkflow=randomUUID(),waitingJob=randomUUID();
+    const hookWorkflow=randomUUID(),hookJob=randomUUID(),destination='Fictional recovery receiver';
+    env.HARBOR_WEBHOOK_DESTINATIONS=JSON.stringify([{workspaceId:inboxWorkspace,name:destination}]);
+    await restart();
+    const waitingPath=randomUUID(),secondNote=randomUUID(),gatedHook=randomUUID(),heldPath=randomUUID(),heldSuccessor=randomUUID();
+    const secondNoteBody='Confirm the recovered customer handoff.';
+    const pathAction={kind:'note',body:'Prepare the recovered customer handoff.',delayMinutes:0,waitForLifecycle:'Customer'};
+    await writeRecord('/api/workflows',{action:'save',id:waitingWorkflow,revision:0,definition:{
+      name:'Recovery handoff',trigger:'manual_contact',actionKind:'conditional_paths',
+      paths:[{id:waitingPath,name:'Lead',mode:'all',conditions:[{field:'lifecycle',operator:'eq',value:'Lead'}],action:pathAction,
+        then:[{id:secondNote,action:{kind:'note',body:secondNoteBody,delayMinutes:0}},
+          {id:gatedHook,action:{kind:'webhook',destination,delayMinutes:0}}]}],
+      otherwise:{id:randomUUID(),name:'Other contact',action:{kind:'note',body:'Review the contact.',delayMinutes:0}}}});
+    await writeRecord('/api/workflows',{action:'setEnabled',id:waitingWorkflow,revision:1,enabled:true});
+    await writeRecord('/api/workflows',{action:'runContact',id:waitingJob,workflowId:waitingWorkflow,
+      workflowRevision:2,contactId:waitingContact.id});
+    await writeRecord('/api/workflows',{action:'save',id:hookWorkflow,revision:0,definition:{
+      name:'Restore webhook handoff',trigger:'manual_contact',actionKind:'conditional_paths',
+      paths:[{id:heldPath,name:'Active handoff',mode:'all',conditions:[{field:'name',operator:'known',value:''}],
+        action:{kind:'webhook',destination,delayMinutes:0,waitForLifecycle:'Customer'},
+        then:[{id:heldSuccessor,action:{kind:'note',body:'Record the confirmed callback.',delayMinutes:0}}]}],
+      otherwise:{id:randomUUID(),name:'Other contact',action:{kind:'note',body:'Review the contact.',delayMinutes:0}}}});
+    await writeRecord('/api/workflows',{action:'setEnabled',id:hookWorkflow,revision:1,enabled:true});
+    await writeRecord('/api/workflows',{action:'runContact',id:hookJob,workflowId:hookWorkflow,
+      workflowRevision:2,contactId:waitingContact.id});
+    const ticketRule=randomUUID(),ticketNote='Review the restored repair with its requester.';
+    await writeRecord('/api/workflows',{action:'save',id:ticketRule,revision:0,definition:{name:'Repair follow-up',
+      trigger:'ticket_status',ticketStatus:'Closed',body:ticketNote,delayMinutes:1440}});
+    await writeRecord('/api/workflows',{action:'setEnabled',id:ticketRule,revision:1,enabled:true});
+    const {record:sourceTicket}=await writeRecord('/api/tickets',{action:'save',contactId:waitingContact.id,
+      data:{name:'Fictional repaired scanner',ticketStatus:'Closed'}});
+    const writeCredential=await writeRecord('/api/api-tokens',{name:'Disposable integration',days:30,permissions:{companies:'read_write_archive'}});
+    const webhookId=randomUUID();
+    await sql`INSERT INTO portable_webhook_subscriptions (workspace_id,id,destination,objects) VALUES
+      (${inboxWorkspace},${webhookId},'fictional-restore',ARRAY['companies'])`;
+    const companyRule=randomUUID();
+    await writeRecord('/api/workflows',{action:'save',id:companyRule,revision:0,definition:{
+      name:'Welcome new accounts',trigger:'company_created',actionKind:'task',delayMinutes:0,task:{name:'Prepare a welcome plan'}}});
+    await writeRecord('/api/workflows',{action:'setEnabled',id:companyRule,revision:1,enabled:true});
+    const integratedCompany=randomUUID(),companyApi='/api/v1/records/companies';
+    const credential=(secret,method,body,etag)=>({method,headers:{authorization:'Bearer '+secret,'content-type':'application/json',
+      ...(etag?{'if-match':etag}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const inserted=await request(companyApi,credential(writeCredential.token,'POST',{id:integratedCompany,properties:{name:'Fictional restore customer'}}));
+    assert.equal(inserted.status,201,await inserted.clone().text());
+    assert.equal((await sql`SELECT count(*)::int AS n FROM portable_webhook_deliveries
+      WHERE subscription_id=${webhookId} AND record_id=${integratedCompany} AND status='pending'`)[0].n,1);
+    const companyHistoryPath='/api/workflows?runCompanyId='+integratedCompany;
+    const sourceCompanyHistory=await (await request(companyHistoryPath,{headers})).json();
+    assert.equal(sourceCompanyHistory.runs.length,1);
+    const [companyReceipt]=sourceCompanyHistory.runs;
+    assert.equal(companyReceipt.companyId,integratedCompany);
+    assert.ok(companyReceipt.companyTaskId);
+    const trackingSiteId=randomUUID(),trackedForm=randomUUID(),trackingOrigin='https://restore.example.test',visitor=randomUUID();
+    await writeRecord('/api/web-attribution',{id:trackingSiteId,revision:0,name:'Restored publisher',origin:trackingOrigin,enabled:true});
+    await writeRecord('/api/lead-forms',{action:'save',id:trackedForm,revision:0,definition:{title:'Recovery request',captureContacts:false}});
+    await writeRecord('/api/lead-forms',{action:'setEnabled',id:trackedForm,revision:1,enabled:true});
+    const pageEvent={siteId:trackingSiteId,visitor,eventId:randomUUID(),path:'/demo',source:'partner'};
+    const collector='/api/public/journey?siteId='+trackingSiteId;
+    const collect={method:'POST',headers:{origin:trackingOrigin,'content-type':'text/plain'},body:JSON.stringify(pageEvent)};
+    assert.equal((await request(collector,collect)).status,202);
+    const conversion=randomUUID();
+    await writeRecord('/api/public/forms/'+trackedForm,{id:conversion,revision:2,payload:{name:'Restore visitor',email:'restore-visitor@example.test'},
+      journey:{siteId:trackingSiteId,visitor}});
+    const quickReplyId=randomUUID();
+    await writeRecord('/api/team-inbox',{action:'save_snippet',id:quickReplyId,revision:0,name:'Repair acknowledgement',body:'We are checking the scanner.'});
+    await writeRecord('/api/knowledge-base',{action:'save',id:articleId,revision:0,content:{
+      title:'Recover a field handbook',subtitle:'',category:'',tags:[],bodyHtml:'<p>Restart the display.</p>'}});
+    const {center}=await writeRecord('/api/knowledge-base?publication=1',{action:'settings',name:'Field help',accent:'#226655',enabled:true,revision:0});
+    await writeRecord('/api/knowledge-base?publication=1',{action:'publish',id:articleId,articleRevision:1,revision:0});
+    const objectId=randomUUID(),customRecordId=randomUUID(),serialId=randomUUID();
+    const customApi='/api/custom-objects';
+    await writeRecord(customApi,{action:'define',id:objectId,revision:0,definition:{name:'Equipment',fields:[
+      {id:serialId,label:'Serial number',type:'text',required:true,options:[]}
+    ]}});
+    const equipmentRule=randomUUID();
+    await writeRecord('/api/workflows',{action:'save',id:equipmentRule,revision:0,definition:{name:'Equipment check-in',
+      trigger:'custom_record_created',objectId,actionKind:'task',delayMinutes:0,task:{name:'Inspect new equipment'}}});
+    await writeRecord('/api/workflows',{action:'setEnabled',id:equipmentRule,revision:1,enabled:true});
+    await writeRecord(customApi,{action:'save',id:customRecordId,objectId,revision:0,schemaRevision:1,
+      name:'Loading dock scanner',values:{[serialId]:'DS-482'}});
+    await writeRecord(customApi,{action:'link',id:customRecordId,objectId,revision:1,kind:'companies',target:pilot.records.companies.id});
+    const equipmentRunPath='/api/workflows?'+new URLSearchParams({runObjectId:objectId,runCustomRecordId:customRecordId});
+    const equipmentRuns=(await (await request(equipmentRunPath,{headers})).json()).runs;
+    assert.equal(equipmentRuns.length,1);
+    assert.ok(equipmentRuns[0].customTaskId);
+    const equipmentImport=await seedEquipmentImport({request,origin:env.HARBOR_LOGIN_ORIGIN,owner:headers,
+      rep:await signIn('invitee@example.test'),workspace:inboxWorkspace,objectId,existingId:customRecordId,serialId,
+      contactId:pilot.records.contacts.id});
+    const landingId=randomUUID();
+    const edition={title:'Spring field day',slug:'field-day',description:'',accent:'#126260',blocks:[]};
+    const firstEdition=await writeRecord('/api/landing-pages',{action:'save',id:landingId,revision:0,draft:edition});
+    await writeRecord('/api/landing-pages',{action:'publish',id:landingId,revision:firstEdition.revision});
+    await writeRecord('/api/landing-pages',{action:'save',id:landingId,revision:2,draft:{...edition,title:'Private autumn plans'}});
+    const landingPath='/p/'+firstEdition.workspaceId+'/field-day';
+    assert.match(await (await request(landingPath)).text(),/Spring field day/);
+    const helpPath='/help/'+center.id+'/'+articleId;
+    assert.match(await (await request(helpPath)).text(),/Restart the display/);
+    const supportPolicy={revision:0,enabled:true,targets:{Urgent:30,High:60,Medium:120,Low:240},
+      calendar:{zone:'America/New_York',week:[null,...Array(5).fill({open:540,close:1020}),null],holidays:['2026-12-25']}};
+    const ticketPolicyPath='/api/ticket-sla?kind=first-response';
+    await writeRecord(ticketPolicyPath,supportPolicy);
+    const responseTicket=(await writeRecord('/api/tickets',{action:'save',data:{name:'Fictional support case',ticketPriority:'High'}})).record;
+    const finished=(await writeRecord('/api/tickets',{action:'first_response',id:responseTicket.id,expectedRevision:responseTicket.revision,
+      channel:'Email',summary:'Shared the display reset steps.'})).record.firstResponse;
     const previous=new URL(pilot.attachment,env.HARBOR_LOGIN_ORIGIN);
     const version=randomUUID(),replacement=Buffer.from('Fictional replacement proposal\n');
     const latest=new URL(previous);
@@ -745,6 +864,11 @@ export async function verifyPortableRecoveryJourney({env,mock,request,headers,sq
     });
     assert.deepEqual(await readdir(root),[]);
     const contactId=pilot.records.contacts.id;
+    const accessExport=await request('/api/crm?kind=contacts&export=csv',{headers});
+    assert.equal(accessExport.status,200);
+    assert.ok((await accessExport.text()).includes(contactId));
+    const accessEvidence=await sql`SELECT * FROM portable_record_access_events WHERE action='csv' AND ${contactId}::uuid=ANY(record_ids) ORDER BY id`;
+    assert.ok(accessEvidence.length);
     const jobs='/api/background-jobs?recordId='+contactId;
     const note={id:randomUUID(),body:'Test completed Note before backup',scheduledFor:0};
     assert.equal((await request(jobs,{method:'POST',headers:{...headers,origin:env.HARBOR_LOGIN_ORIGIN,
@@ -758,6 +882,19 @@ export async function verifyPortableRecoveryJourney({env,mock,request,headers,sq
     const receipt=await noteReceipt(request,headers);
     assert.equal(receipt.status,'succeeded');
     assert.equal(receipt.attempts,1);
+
+    async function readBranch(send,auth,id){
+      const response=await send('/api/workflows?runWorkflowId='+id,{headers:auth});
+      assert.equal(response.status,200);
+      const {runs,workflows}=await response.json();
+      assert.equal(runs.length,1);
+      return {enabled:workflows.find(workflow=>workflow.id===id).enabled,run:runs[0]};
+    }
+    const sourceWaitBranch=await readBranch(request,headers,waitingWorkflow);
+    const sourceHeldBranch=await readBranch(request,headers,hookWorkflow);
+    assert.deepEqual([sourceWaitBranch.enabled,sourceHeldBranch.enabled],[true,true]);
+    assert.deepEqual(sourceWaitBranch.run.pathSteps.map(step=>step.jobId),[waitingJob,null,null]);
+    assert.deepEqual(sourceHeldBranch.run.pathSteps.map(step=>step.jobId),[hookJob,null]);
 
     const {day,result,versions}=JSON.parse(run({...env,HARBOR_PORTABLE_BACKUP_ENABLED:'true'},'backup-tick',root));
     assert.equal(result,'complete');
@@ -817,9 +954,74 @@ export async function verifyPortableRecoveryJourney({env,mock,request,headers,sq
       if(!ready)await delay(100);
     }
     assert.ok(ready);
+    assert.equal((await restored(landingPath)).status,404);
+    const [recoveredPage]=await targetSql`SELECT draft,last_published FROM portable_landing_pages WHERE id=${landingId}`;
+    assert.equal(recoveredPage.draft.title,'Private autumn plans');
+    assert.deepEqual(recoveredPage.last_published,edition);
+    assert.equal((await restored(helpPath)).status,404);
+    assert.equal(Number((await targetSql`SELECT revision FROM portable_knowledge_versions WHERE article_id=${articleId}`)[0].revision),1);
+    assert.equal((await targetSql`SELECT article_id FROM portable_article_publications`).length,0);
     assert.equal((await restored(jobs,{headers})).status,401);
     const owner=await signIn('owner@example.test',restored,origin);
     const other=await signIn('other@example.test',restored,origin);
+    assert.equal((await targetSql`SELECT count(*)::int AS n FROM portable_webhook_subscriptions`)[0].n,0);
+    assert.equal((await targetSql`SELECT count(*)::int AS n FROM portable_webhook_deliveries`)[0].n,0);
+    const companyDetail=companyApi+'/'+integratedCompany;
+    assert.equal((await restored(companyDetail,credential(writeCredential.token,'PATCH',{properties:{name:'Copied key'}},inserted.headers.get('etag')))).status,401);
+    const freshKey=await restored('/api/api-tokens',{method:'POST',headers:{...owner,origin,'content-type':'application/json'},
+      body:JSON.stringify({name:'Restored integration',days:30,permissions:{companies:'read_write'}})});
+    assert.equal(freshKey.status,201);
+    const newSecret=(await freshKey.json()).token;
+    const recoveredCompany=await restored(companyDetail,credential(newSecret,'GET'));
+    assert.equal((await recoveredCompany.json()).properties.name,'Fictional restore customer');
+    const amended=await restored(companyDetail,credential(newSecret,'PATCH',{properties:{name:'Updated on restored instance'}},recoveredCompany.headers.get('etag')));
+    assert.equal(amended.status,200,await amended.clone().text());
+    assert.equal((await amended.json()).properties.name,'Updated on restored instance');
+    const restoredCompanyHistory=await (await restored(companyHistoryPath,{headers:owner})).json();
+    assert.equal(restoredCompanyHistory.workflows.find(rule=>rule.id===companyRule).enabled,false);
+    assert.deepEqual(restoredCompanyHistory.runs,[companyReceipt]);
+    const tasksForCompany=await (await restored('/api/crm?kind=tasks&companyId='+integratedCompany,{headers:owner})).json();
+    assert.deepEqual(tasksForCompany.records.map(task=>[task.id,task.data.name,task.companyId]),[
+      [companyReceipt.companyTaskId,'Prepare a welcome plan',integratedCompany]]);
+    const restoredLibrary=await (await restored('/api/team-inbox?snippets=1',{headers:owner})).json();
+    assert.deepEqual(restoredLibrary.items,[{id:quickReplyId,revision:1,name:'Repair acknowledgement',body:'We are checking the scanner.'}]);
+    const attributionPath='/api/web-attribution?siteId='+trackingSiteId+'&inquiryId='+conversion;
+    const recoveredJourney=await (await restored(attributionPath,{headers:owner})).json();
+    assert.equal(recoveredJourney.sites[0].enabled,false);
+    assert.deepEqual(recoveredJourney.path.map(step=>step.path),['/demo']);
+    assert.equal(recoveredJourney.conversions,1);
+    assert.ok(!(await restored(collector,collect)).ok);
+    assert.equal((await restored(attributionPath,{headers:other})).status,404);
+    const restoredInboxPath='/api/team-inbox?id='+inboxId;
+    const inbox=await (await restored(restoredInboxPath,{headers:owner})).json();
+    assert.equal(inbox.conversation.claimedBy,actorId);
+    assert.equal(inbox.messages[0].id,replyId);
+    assert.equal(inbox.messages[0].state,'uncertain');
+    assert.equal(inbox.pendingReply.id,replyId);
+    assert.equal((await (await restored('/api/team-inbox?status=review',{headers:owner})).json()).items[0].id,inboxId);
+    assert.equal((await sql`SELECT state FROM portable_inbox_messages WHERE id=${replyId}`)[0].state,'sending');
+    assert.equal((await restored(restoredInboxPath,{headers:other})).status,404);
+    const customPath=customApi+'?'+new URLSearchParams({objectId,record:customRecordId});
+    const recoveredObject=await (await restored(customPath,{headers:owner})).json();
+    assert.equal(recoveredObject.type.definition.fields[0].label,'Serial number');
+    assert.equal(recoveredObject.record.data.values[serialId],'DS-482-R');
+    await verifyRestoredEquipmentImport({scenario:equipmentImport,request:restored,origin,owner,
+      rep:await signIn('invitee@example.test',restored,origin),workspace:inboxWorkspace,serialId,existingId:customRecordId,
+      contactId:pilot.records.contacts.id,attachment:pilot.attachment});
+    assert.deepEqual(recoveredObject.items.map(row=>row.target),[pilot.records.companies.id]);
+    assert.equal((await restored(customPath,{headers:other})).status,404);
+    const restoredEquipment=await (await restored(equipmentRunPath,{headers:owner})).json();
+    assert.deepEqual(restoredEquipment.runs,equipmentRuns);
+    assert.equal(restoredEquipment.workflows.find(w=>w.id===equipmentRule).enabled,false);
+    const taskPath='/api/crm?kind=tasks&id='+equipmentRuns[0].customTaskId;
+    const equipmentTask=await (await restored(taskPath,{headers:owner})).json();
+    assert.equal(equipmentTask.data.name,'Inspect new equipment');
+    assert.equal((await restored(taskPath,{headers:other})).status,404);
+    const restoredResponse=await (await restored('/api/tickets?id='+responseTicket.id,{headers:owner})).json();
+    assert.deepEqual(restoredResponse.firstResponse,finished);
+    assert.deepEqual(await (await restored(ticketPolicyPath,{headers:owner})).json(),{...supportPolicy,revision:1});
+    assert.deepEqual(await targetSql`SELECT * FROM portable_record_access_events WHERE action='csv' AND ${contactId}::uuid=ANY(record_ids) ORDER BY id`,accessEvidence);
+    await assert.rejects(targetSql`DELETE FROM portable_record_access_events`,/append-only/);
     await verifyRestoredPortablePilot({restored,owner,other,pilot});
     const read=await restored(latest.pathname+latest.search,{headers:owner});
     assert.equal(read.status,200);
@@ -834,6 +1036,53 @@ export async function verifyPortableRecoveryJourney({env,mock,request,headers,sq
     assert.deepEqual(await noteReceipt(restored,owner),receipt);
     const [{count}]=await targetSql`SELECT count(*)::int AS count FROM portable_notes WHERE job_id=${note.id}`;
     assert.equal(count,1);
+    const waitHistory='/?view=workflows&runWorkflowId='+waitingWorkflow;
+    const historyPage=await restored(waitHistory,{headers:owner});
+    assert.equal(historyPage.status,200);
+    assert.match((await historyPage.text()).replaceAll('<!-- -->',''),/Waiting for Customer/);
+    const changed=await restored('/api/crm',{method:'POST',headers:{...owner,origin,'content-type':'application/json'},
+      body:JSON.stringify({action:'save',kind:'contacts',id:waitingContact.id,expectedRevision:waitingContact.revision,
+        data:{...waitingContact.data,lifecycle:'Customer'}})});
+    assert.equal(changed.status,200,await changed.clone().text());
+    run(webEnv,'worker','--once','--notes-only');
+    run(webEnv,'worker','--once','--notes-only');
+    run(webEnv,'worker','--once','--notes-only');
+    const recoveredWait=await readBranch(restored,owner,waitingWorkflow);
+    assert.equal(recoveredWait.enabled,false);
+    assert.deepEqual(recoveredWait.run.pathSteps.map(step=>[step.id,step.status,step.issue]),[
+      [waitingPath,'succeeded',null],[secondNote,'succeeded',null],[gatedHook,'skipped','webhook_workflow_changed']]);
+    const receivedNotes=await targetSql`SELECT s.position,n.body,j.attempts FROM portable_workflow_path_steps s
+      JOIN portable_jobs j ON j.workspace_id=s.workspace_id AND j.id=s.job_id
+      JOIN portable_notes n ON n.workspace_id=j.workspace_id AND n.job_id=j.id
+      WHERE s.workspace_id=${inboxWorkspace} AND s.run_id=${waitingJob} ORDER BY s.position`;
+    assert.deepEqual(Array.from(receivedNotes),[{position:0,body:pathAction.body,attempts:1},{position:1,body:secondNoteBody,attempts:1}]);
+    const {run:held,enabled}=await readBranch(restored,owner,hookWorkflow);
+    assert.equal(enabled,false);
+    assert.deepEqual([held.jobId,held.jobStatus,held.jobIssue,held.attempts,held.webhookDestination],
+      [hookJob,'attention','restore_requires_reconciliation',0,destination]);
+    assert.deepEqual(held.pathSteps.map(step=>[step.id,step.jobId,step.status,step.issue]),[
+      [heldPath,hookJob,'attention','restore_requires_reconciliation'],[heldSuccessor,null,null,null]]);
+    const ticketResult=await restored('/api/workflows?runTicketId='+sourceTicket.id,{headers:owner});
+    assert.equal(ticketResult.status,200);
+    const ticketHistory=await ticketResult.json();
+    assert.equal(ticketHistory.workflows.find(w=>w.id===ticketRule).enabled,false);
+    assert.equal(ticketHistory.runs.length,1);
+    const [restoredRun]=ticketHistory.runs;
+    assert.deepEqual([restoredRun.ticketId,restoredRun.ticketName,restoredRun.ticketRevision,restoredRun.ticketContactId,restoredRun.jobStatus],
+      [sourceTicket.id,sourceTicket.data.name,1,waitingContact.id,'queued']);
+    await targetSql`UPDATE portable_jobs SET available_at=0 WHERE workspace_id=${inboxWorkspace} AND id=${restoredRun.jobId}`;
+    run(webEnv,'worker','--once','--notes-only');
+    run(webEnv,'worker','--once','--notes-only');
+    const ticketNotes=await targetSql`SELECT n.body,j.contact_id FROM portable_notes n
+      JOIN portable_jobs j ON j.workspace_id=n.workspace_id AND j.id=n.job_id
+      WHERE n.workspace_id=${inboxWorkspace} AND n.job_id=${restoredRun.jobId} AND j.status='succeeded' AND j.attempts=1`;
+    assert.deepEqual(Array.from(ticketNotes),[{body:ticketNote,contact_id:waitingContact.id}]);
+    const [sourceTicketJob]=await sql`SELECT status,attempts FROM portable_jobs WHERE workspace_id=${inboxWorkspace} AND id=${restoredRun.jobId}`;
+    assert.deepEqual(sourceTicketJob,{status:'queued',attempts:0});
+    const [sourceWait]=await sql`SELECT status,attempts,wait_for_lifecycle FROM portable_jobs WHERE id=${waitingJob}`;
+    assert.deepEqual(sourceWait,{status:'queued',attempts:0,wait_for_lifecycle:'Customer'});
+    assert.deepEqual(await readBranch(request,headers,waitingWorkflow),sourceWaitBranch);
+    assert.deepEqual(await readBranch(request,headers,hookWorkflow),sourceHeldBranch);
     return {recoveryPointAgeMs:outageAt-verified.captureStartedAt,recoveryMillis:Math.ceil(performance.now()-recoveryStart)};
   }finally{
     if(server){server.kill();await exit;}
@@ -885,10 +1134,41 @@ export async function verifyPortableRecovery({env,mock,request,headers,record,ot
     }
     const refuseRestore=(bundle,message)=>assertRefused(restoreEnv,bundle,message,restoreArgs);
     const microsoftId=randomUUID(),microsoftSubject=randomUUID()+':'+randomUUID();
-    const microsoftEmail='outlook-recovery@example.test';
+    const samlId=randomUUID(),samlDirectoryId=randomUUID(),samlEmail='saml-recovery@example.test';
+    const samlSubject=createHash('sha256').update(JSON.stringify(['urn:fictional:directory','employee-42'])).digest('hex');
+    const microsoftEmail='outlook-recovery@example.test',directoryId=randomUUID();
+    const mappedTeam=randomUUID(),scimGroupId=randomUUID(),groupExternalId=randomUUID();
+    const teamPage=randomUUID(),teamBooking=randomUUID(),hostOffer=randomUUID();
     await sql.begin(async tx=>{
+      await tx`INSERT INTO login_identities (id,saml_subject,saml_directory_issuer,directory_authority,email,created_at,updated_at) VALUES (${samlId},${samlSubject},'urn:fictional:directory',${sharing.workspaceId},${samlEmail},0,0)`;
+      await tx`INSERT INTO portable_directory_users(id,workspace_id,user_id,saml_issuer,saml_external_id)
+        VALUES (${samlDirectoryId},${sharing.workspaceId},${samlId},'urn:fictional:directory','employee-42')`;
+      await tx`INSERT INTO portable_workspace_viewers (id,workspace_id,viewer_id,role,view_scope,edit_scope)
+        VALUES (${randomUUID()},${sharing.workspaceId},${samlId},'viewer','owned','owned')`;
       await tx`INSERT INTO login_identities (id,microsoft_subject,email,created_at,updated_at)
         VALUES (${microsoftId},${microsoftSubject},${microsoftEmail},0,0)`;
+      await tx`INSERT INTO portable_directory_users (id,workspace_id,user_id) VALUES (${directoryId},${sharing.workspaceId},${microsoftId})`;
+      await tx`INSERT INTO portable_workspace_teams (workspace_id,id,name,name_key) VALUES
+        (${sharing.workspaceId},${mappedTeam},'Fictional recovery team','fictional recovery team')`;
+      await tx`INSERT INTO portable_workspace_viewers (id,workspace_id,viewer_id,team_id) VALUES
+        (${randomUUID()},${sharing.workspaceId},${microsoftId},${mappedTeam})`;
+      await tx`INSERT INTO portable_standard_property_access (workspace_id,kind,id,restricted,visible_team_id,revision)
+        VALUES (${sharing.workspaceId},'companies','annualRevenue',true,${mappedTeam},1)`;
+      await tx`INSERT INTO portable_directory_groups (workspace_id,team_id,tenant,external_id,group_id,display_name)
+        VALUES (${sharing.workspaceId},${mappedTeam},${microsoftSubject.split(':')[0]},${groupExternalId},${scimGroupId},'Fictional recovery group')`;
+      await tx`INSERT INTO portable_directory_group_members (workspace_id,user_id,group_id)
+        VALUES (${sharing.workspaceId},${microsoftId},${scimGroupId})`;
+      await tx`INSERT INTO portable_lead_routing_members
+        (workspace_id,user_id,available,country,capacity,time_zone,days,start_minute,end_minute,revision)
+        VALUES (${sharing.workspaceId},${microsoftId},true,'',5,'UTC',127,0,1440,1)`;
+      await tx`INSERT INTO portable_team_availability (id,workspace_id,user_id,windows,revision)
+        VALUES (${hostOffer},${sharing.workspaceId},${microsoftId},'[]',1)`;
+      await tx`INSERT INTO portable_team_calendars (id,workspace_id,title,mode,duration,hosts)
+        VALUES (${teamPage},${sharing.workspaceId},'Fictional demo','rotation',30,ARRAY[${hostOffer}::uuid])`;
+      await tx`INSERT INTO portable_team_bookings (id,workspace_id,page_id,title,email,start_at,end_at)
+        VALUES (${teamBooking},${sharing.workspaceId},${teamPage},'Fictional demo','fictional@example.test',60000,1860000)`;
+      await tx`INSERT INTO portable_team_booking_hosts (workspace_id,booking_id,user_id)
+        VALUES (${sharing.workspaceId},${teamBooking},${microsoftId})`;
       await tx`INSERT INTO portable_google_grants (user_id,provider,id,email,refresh_token)
         VALUES (${microsoftId},'outlook-calendar',${randomUUID()},${microsoftEmail},'fictional encrypted test credential')`;
     });
@@ -971,7 +1251,7 @@ export async function verifyPortableRecovery({env,mock,request,headers,record,ot
     try{
       await sql`GRANT USAGE ON SCHEMA public,drizzle TO ${sql(backupRole)}`;
       await sql`GRANT SELECT ON ALL TABLES IN SCHEMA public,drizzle TO ${sql(backupRole)}`;
-      await sql`GRANT SELECT ON SEQUENCE drizzle.__drizzle_migrations_id_seq TO ${sql(backupRole)}`;
+      await sql`GRANT SELECT ON ALL SEQUENCES IN SCHEMA public,drizzle TO ${sql(backupRole)}`;
       await sql`REVOKE SELECT ON public.portable_ticket_events FROM ${sql(backupRole)}`;
       await missingBackupPermissions();
       await sql`GRANT SELECT ON public.portable_ticket_events TO ${sql(backupRole)}`;
@@ -1056,12 +1336,41 @@ export async function verifyPortableRecovery({env,mock,request,headers,record,ot
       ...headers,origin:env.HARBOR_LOGIN_ORIGIN,'content-type':'application/json',
     },body:JSON.stringify(body)});
     const ticketName='Fictional recovery ticket '+randomUUID();
-    const createdTicket=await writeTicket({action:'save',data:{name:ticketName},contactId:record.id,companyId:company.id});
+    const createdTicket=await writeTicket({action:'save',data:{name:ticketName,tags:['Repair','Warranty']},contactId:record.id,companyId:company.id});
     assert.equal(createdTicket.status,201);
     const {record:{id:ticketId}}=await createdTicket.json();
     const closedTicket=await writeTicket({action:'status',id:ticketId,expectedRevision:1,status:'Closed'});
     assert.equal(closedTicket.status,200);
-    const {record:expectedTicket}=await closedTicket.json();
+    const {record:closedRecord}=await closedTicket.json();
+    const ticketPath='/api/tickets?id='+ticketId;
+    const sourceTicket=await request(ticketPath,{headers});
+    assert.equal(sourceTicket.status,200);
+    const expectedTicket=await sourceTicket.json();
+    assert.deepEqual(expectedTicket,{...closedRecord,inboxConversationId:null});
+    assert.deepEqual(expectedTicket.data.tags,['repair','warranty']);
+    const sourceOrigin=env.HARBOR_LOGIN_ORIGIN;
+    const staffPost=async(path,body)=>{
+      const response=await request(path,{method:'POST',headers:{...headers,origin:sourceOrigin,'content-type':'application/json'},body:JSON.stringify(body)});
+      assert.equal(response.status,200,await response.clone().text());
+      return response.json();
+    };
+    const helpSettings='/api/knowledge-base?publication=1';
+    const {center}=await (await request(helpSettings,{headers})).json();
+    const portalCenter=center?.enabled?center:(await staffPost(helpSettings,{action:'settings',enabled:true,
+      name:'Recovery help center',accent:'#126060',revision:center?.revision??0})).center;
+    const ownerCase='/api/case-portal';
+    const publication={ticketId,ticketRevision:expectedTicket.revision,contactId:record.id,expectedRevision:0};
+    const subject='Fictional customer-visible repair update';
+    await staffPost(ownerCase,{action:'publish',...publication,subject,update:'Your part has arrived.'});
+    const invite=await staffPost(ownerCase,{action:'invite',...publication});
+    const casesPath='/help/'+portalCenter.id+'/cases';
+    const redemption=await request(casesPath,{method:'POST',headers:{origin:sourceOrigin,'content-type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({action:'redeem',invite:invite.inviteToken})});
+    assert.equal(redemption.status,303);
+    const customerCookie=redemption.headers.get('set-cookie').split(';')[0];
+    const customerView=await request(casesPath+'?case='+ticketId,{headers:{cookie:customerCookie}});
+    assert.equal(customerView.status,200);
+    assert.ok((await customerView.text()).includes(subject));
     const ticketHistory=db=>db`SELECT actor_id,revision,previous,data,occurred_at FROM portable_ticket_events
       WHERE workspace_id=${sharing.workspaceId} AND ticket_id=${ticketId} ORDER BY revision`;
     const [ticketOwner]=await sql`SELECT owner_id FROM private_workspaces WHERE id=${sharing.workspaceId}`;
@@ -1647,6 +1956,7 @@ process.exit(result.status??1);
     });
     refuseRestore(bundle,/Restore requires an empty Postgres database/);
     assert.equal((await targetSql`SELECT count(*)::int AS count FROM login_sessions`)[0].count,0);
+    assert.equal((await targetSql`SELECT count(*)::int AS count FROM portable_api_tokens`)[0].count,0);
     assert.equal((await targetSql`SELECT status FROM portable_calendar_meetings WHERE id=${sharing.calendarInvites.pendingId}`)[0].status,'attention');
     assert.equal((await targetSql`SELECT status FROM portable_calendar_meetings WHERE id=${sharing.calendarInvites.rejectedId}`)[0].status,'rejected');
     assert.equal((await targetSql`SELECT status FROM portable_calendar_meetings WHERE id=${sharing.calendarInvites.lossId}`)[0].status,'cancel_attention');
@@ -1836,6 +2146,22 @@ process.exit(result.status??1);
     assert.deepEqual((await restoredSharing.json()).shared,[]);
     assert.equal((await restored('/api/crm?workspaceId='+sharing.workspaceId,{headers:other})).status,404);
     assert.equal((await targetSql`SELECT count(*)::int AS count FROM portable_workspace_viewers`)[0].count,0);
+    assert.equal((await targetSql`SELECT count(*)::int AS count FROM portable_lead_routing_members`)[0].count,0);
+    assert.equal((await targetSql`SELECT count(*)::int AS count FROM portable_team_availability`)[0].count,0);
+    assert.equal((await targetSql`SELECT count(*)::int AS count FROM portable_team_calendars`)[0].count,0);
+    const [restoredBooking]=await targetSql`SELECT b.title,h.user_id FROM portable_team_bookings b
+      JOIN portable_team_booking_hosts h ON h.workspace_id=b.workspace_id AND h.booking_id=b.id
+      WHERE b.workspace_id=${sharing.workspaceId} AND b.id=${teamBooking}`;
+    assert.deepEqual({...restoredBooking},{title:'Fictional demo',user_id:microsoftId});
+    const [restoredEmployee]=await targetSql`SELECT user_id FROM portable_directory_users WHERE id=${directoryId} AND workspace_id=${sharing.workspaceId}`;
+    assert.equal(restoredEmployee.user_id,microsoftId);
+    const [restoredTeam]=await targetSql`SELECT name FROM portable_workspace_teams WHERE workspace_id=${sharing.workspaceId} AND id=${mappedTeam}`;
+    assert.equal(restoredTeam?.name,'Fictional recovery team');
+    const [fieldRule]=await targetSql`SELECT restricted,visible_team_id,revision FROM portable_standard_property_access
+      WHERE workspace_id=${sharing.workspaceId} AND kind='companies' AND id='annualRevenue'`;
+    assert.deepEqual({...fieldRule},{restricted:true,visible_team_id:mappedTeam,revision:1});
+    assert.equal((await targetSql`SELECT count(*)::int AS n FROM portable_directory_groups`)[0].n,0);
+    assert.equal((await targetSql`SELECT count(*)::int AS n FROM portable_directory_group_members`)[0].n,0);
     assert.equal((await targetSql`SELECT count(*)::int AS count FROM portable_workspace_invites`)[0].count,0);
     const invitee=await signIn('invitee@example.test',restored,origin);
     assert.deepEqual((await (await restored('/api/workspaces',{headers:invitee})).json()).incoming,[]);
@@ -1890,10 +2216,18 @@ process.exit(result.status??1);
     assert.equal((await restored(propertyPath,{headers:other})).status,404);
     await verifyRestoredSavedViews({request:restored,origin,owner,other,workspaceId:sharing.workspaceId,savedViews:sharing.savedViews,memberView:sharing.memberView});
     await verifyRestoredPortableSegment({request:restored,owner,other,segment:sharing.segment});
-    const ticketPath='/api/tickets?id='+ticketId;
     const restoredTicket=await restored(ticketPath,{headers:owner});
     assert.equal(restoredTicket.status,200);
     assert.deepEqual(await restoredTicket.json(),expectedTicket);
+    const restoredCase=await restored(ownerCase+'?ticketId='+ticketId,{headers:owner});
+    assert.equal(restoredCase.status,200);
+    const {center:copiedCenter,publication:copiedPublication,access:copiedAccess}=await restoredCase.json();
+    assert.deepEqual([copiedCenter,copiedPublication,copiedAccess],[null,null,null]);
+    assert.equal((await targetSql`SELECT 1 FROM portable_case_access LIMIT 1`).length,0);
+    assert.equal((await targetSql`SELECT 1 FROM portable_case_publications LIMIT 1`).length,0);
+    const copiedLink=await restored(casesPath+'?case='+ticketId,{headers:{cookie:customerCookie}});
+    assert.equal(copiedLink.status,404);
+    assert.ok(!(await copiedLink.text()).includes(subject));
     assert.deepEqual(Array.from(await ticketHistory(targetSql)),originalTicketHistory);
     assert.equal((await restored(ticketPath,{headers:other})).status,404);
     const foreignTicketList=await restored('/api/tickets?search='+encodeURIComponent(ticketName),{headers:other});
@@ -2022,6 +2356,11 @@ process.exit(result.status??1);
     assert.match(restoredQueue,/Restored external action/);
     assert.equal((await sql`SELECT id FROM portable_google_grants WHERE provider IN ('gmail','calendar')`).length,4);
     assert.equal((await sql`SELECT id FROM portable_google_grants WHERE provider='outlook-calendar' AND user_id=${microsoftId}`).length,1);
+    const [restoredSamlRegistration]=await targetSql`SELECT saml_external_id,saml_issuer FROM portable_directory_users WHERE id=${samlDirectoryId} AND user_id=${samlId}`;
+    assert.deepEqual({...restoredSamlRegistration},{saml_external_id:'employee-42',saml_issuer:'urn:fictional:directory'});
+    assert.equal((await targetSql`SELECT 1 FROM portable_workspace_viewers WHERE viewer_id=${samlId}`).length,0);
+    const [restoredSaml]=await targetSql`SELECT saml_subject,google_subject,microsoft_subject,email FROM login_identities WHERE id=${samlId}`;
+    assert.deepEqual({...restoredSaml},{saml_subject:samlSubject,google_subject:null,microsoft_subject:null,email:samlEmail});
     const [restoredMicrosoft]=await targetSql`SELECT google_subject,microsoft_subject,email FROM login_identities WHERE id=${microsoftId}`;
     assert.deepEqual({...restoredMicrosoft},{google_subject:null,microsoft_subject:microsoftSubject,email:microsoftEmail});
     assert.equal((await targetSql`SELECT id FROM portable_google_grants`).length,0);

@@ -1,5 +1,6 @@
 'use client';
 
+import {WorkspaceDate} from './portable-workspace-format';
 import {CalendarDays} from 'lucide-react';
 import {useRef,useState,type FormEvent} from 'react';
 import {scheduledInstants} from '../lib/email/schedule';
@@ -102,7 +103,7 @@ export function PortableCalendar({email,meetings,personal,outlook,outlookOutcome
             </fieldset>
             <button type="submit" disabled={checking}>{checking?'Checking…':'Check availability'}</button>
           </form>
-          {result&&<p role="status"><strong>{result.held?'Held in Harbor':result.availability==='unknown'?'Availability unconfirmed':result.availability==='busy'?'Busy':'Free'}</strong> · Checked {new Date(result.checkedAt).toLocaleTimeString()}</p>}
+          {result&&<p role="status"><strong>{result.held?'Held in Harbor':result.availability==='unknown'?'Availability unconfirmed':result.availability==='busy'?'Busy':'Free'}</strong> · Checked <time dateTime={result.checkedAt}><WorkspaceDate value={result.checkedAt}>{new Date(result.checkedAt).toLocaleTimeString()}</WorkspaceDate></time></p>}
           {error&&<p role="alert">{error}</p>}
         </section>
         {googleAvailable&&!useOutlook&&<CalendarSuggestionsPanel/>}

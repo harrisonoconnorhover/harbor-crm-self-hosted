@@ -1,0 +1,3 @@
+ALTER TABLE "private_workspaces" ADD COLUMN "last_lead_routing_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "private_workspace_lead_routing_order" ON "private_workspaces" USING btree ("last_lead_routing_at" NULLS FIRST,"id");--> statement-breakpoint
+CREATE INDEX "portable_leads_workspace_routing_due" ON "portable_leads" USING btree ("workspace_id","routing_retry_at","id") WHERE "portable_leads"."routing_retry_at" IS NOT NULL AND "portable_leads"."archived_at" IS NULL AND "portable_leads"."assignee_id" IS NULL AND "portable_leads"."deal_id" IS NULL;

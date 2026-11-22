@@ -6,7 +6,7 @@ const fragment='20%_\\';
 const ownerEmail='owner@example.test';
 const otherEmail='other@example.test';
 
-export async function verifyPortableSegments({request,origin,headers,other,sql,workspaceId}){
+export async function verifyPortableSegments({request,origin,headers,other,sql}){
   const resetBudgets=()=>sql`DELETE FROM portable_request_budgets WHERE scope IN ('api_read','api_write') AND subject IN
     (SELECT id FROM login_identities WHERE email IN (${ownerEmail},${otherEmail}))`;
   await resetBudgets();
@@ -20,6 +20,8 @@ export async function verifyPortableSegments({request,origin,headers,other,sql,w
     return (await response.json()).record;
   }
   const first=await contact({data:{name:'Segment '+fragment+' Alpha',email:'Alpha@Example.Test',lifecycle:'Evangelist'}});
+  const {owned:workspaceId}=await (await request('/api/workspaces',{headers})).json();
+  assert.ok(workspaceId);
   const second=await contact({data:{name:'Segment '+fragment+' Beta',email:'beta@example.test',lifecycle:'Evangelist'}});
   await contact({data:{name:'Segment 20 anything Beta',email:'wildcard@example.test',lifecycle:'Evangelist'}});
   await contact({data:{name:'Segment '+fragment+' Wrong stage',email:'stage@example.test',lifecycle:'Other'}});
@@ -39,7 +41,7 @@ export async function verifyPortableSegments({request,origin,headers,other,sql,w
   assert.equal((await save(draft,headers,path,'https://elsewhere.example.test')).status,403);
   for(const invalid of [
     {...draft,mode:'unsupported'},
-    {...draft,criteria:{groups:[criteria.groups[0],criteria.groups[0]]}},
+    {...draft,criteria:{groups:Array(6).fill(criteria.groups[0])}},
     {...draft,criteria:{groups:[[{field:'lifecycle',operator:'neq',value:'Lead'}]]}},
   ])assert.equal((await save(invalid)).status,400);
   const created=await save(draft);
@@ -50,7 +52,7 @@ export async function verifyPortableSegments({request,origin,headers,other,sql,w
   assert.equal((await save(draft)).status,409);
   const byId='?id='+segment.id;
   assert.equal((await get(byId,other)).status,404);
-  assert.equal((await get(byId+'&workspaceId='+workspaceId,other)).status,400);
+  assert.equal((await get(byId+'&workspaceId='+workspaceId,other)).status,404);
   assert.equal((await save({...draft,revision:1},other,path+'?workspaceId='+workspaceId)).status,403);
   assert.deepEqual(await (await get('',other)).json(),{segments:[],next:null});
   const page1=await (await get(byId+'&limit=1')).json();
@@ -73,7 +75,7 @@ export async function verifyPortableSegments({request,origin,headers,other,sql,w
   assert.equal(searched.status,200);
   const matches=await searched.text();
   assert.match(matches,/<h2 id="portable-segment-members">Matching members · 1<\/h2>/);
-  assert.match(matches,/Find segment members/);
+  assert.match(matches,/Find list members/);
   assert.ok(matches.includes('/?contact='+second.id));
   assert.ok(!matches.includes('/?contact='+first.id));
   assert.ok(matches.includes(detail.replaceAll('&','&amp;')+'">Clear member search</a>'));
@@ -100,6 +102,17 @@ export async function verifyPortableSegments({request,origin,headers,other,sql,w
   assert.equal(current.segment.revision,2);
   assert.equal(current.total,'1');
   assert.deepEqual(current.items.map(row=>row.id),[second.id]);
+
+  const alternative={field:'email',operator:'contains',value:'stage@example.test'};
+  const overlap={field:'email',operator:'contains',value:'beta@example.test'};
+  const union=await save({...draft,id:randomUUID(),name:'Qualifying audiences',
+    criteria:{groups:[criteria.groups[0],[alternative],[overlap]]}});
+  assert.equal(union.status,201);
+  const unionId=(await union.json()).segment.id;
+  const audience=await (await get('?id='+unionId)).json();
+  assert.equal(audience.total,'2');
+  assert.deepEqual(audience.items.map(item=>item.email).sort(),['beta@example.test','stage@example.test']);
+  assert.equal((await write(path,{action:'delete',id:unionId,revision:1})).status,200);
 
   const all=await save({...draft,id:randomUUID(),name:'All fixture contacts',criteria:{groups:[]}});
   assert.equal(all.status,201);

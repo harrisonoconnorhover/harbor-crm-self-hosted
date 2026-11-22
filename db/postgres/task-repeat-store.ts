@@ -17,7 +17,7 @@ export async function advanceTaskOccurrence(tx:TaskTransaction,workspaceId:strin
     eq(portableTaskRepeatReceipts.workspaceId,workspaceId),eq(portableTaskRepeatReceipts.predecessorId,source.id)));
   if(prior)return prior.id;
   const data={...nextTaskOccurrence(source.data,now),status:'Not started' as const};
-  const assignee=source.assigneeId?await activeWorkspaceAssignee(tx,workspaceId,source.assigneeId):undefined;
+  const assignee=source.assigneeId?await activeWorkspaceAssignee(tx,workspaceId,source.assigneeId,{tool:'tasks'}):undefined;
   const successor={workspaceId,id:crypto.randomUUID(),revision:1,data,reminderAt:taskReminderInstant(data),assigneeId:assignee?.id??null,
     assigneeLabel:assignee?assigneeLabel(assignee):null,contactId:source.contactId,companyId:source.companyId,
     dealId:source.dealId,queueId:source.queueId,completedAt:null,createdAt:now,updatedAt:now};

@@ -57,6 +57,14 @@ export const portableActivityHistoryQuery=z.union([
 export type PortableActivityHistoryQuery=z.infer<typeof portableActivityHistoryQuery>;
 
 export type PortableOutreach=z.infer<typeof portableOutreachWrite>;
+export type PendingPortableOutreach={time:'now'|number;input:PortableOutreach};
+
+export function preparePortableOutreach(kind:PortableOutreach['kind'],summary:string,time:'now'|number,
+  previous?:PendingPortableOutreach):PendingPortableOutreach{
+  if(previous?.time===time&&previous.input.kind===kind&&previous.input.summary===summary)return previous;
+  return {time,input:{id:crypto.randomUUID(),kind,summary,occurredAt:time==='now'?Date.now():time}};
+}
+
 export type PortableOutreachQuery=z.infer<typeof portableOutreachQuery>;
 
 export type PortableRecordActivityQuery=z.infer<typeof recordActivityQuery>;

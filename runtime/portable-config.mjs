@@ -49,11 +49,38 @@ export function portableStorageClientAddress(env,mode){
   return {endpoint:endpoint.href,forcePathStyle:env.HARBOR_S3_ADDRESSING!=='virtual-hosted'};
 }
 
+export const maximumWorkspaceSeats=150;
+export function portableWorkspaceSeatLimit(env){
+  const raw=env.HARBOR_WORKSPACE_SEAT_LIMIT;
+  if(raw===undefined||raw==='')return 25;
+  if(!/^[1-9][0-9]*$/.test(raw)||Number(raw)>maximumWorkspaceSeats)throw Error('Set HARBOR_WORKSPACE_SEAT_LIMIT to a whole number from 1 to '+maximumWorkspaceSeats+'.');
+  return Number(raw);
+}
+
 export function portableWebAddress(env,mode){
+  portableWorkspaceSeatLimit(env);
   const port=Number(env.PORT??8787),origin=URL.parse(env.HARBOR_LOGIN_ORIGIN??'');
   if(!Number.isInteger(port)||port<1||port>65535||!origin||origin.origin!==env.HARBOR_LOGIN_ORIGIN||
     (mode==='local'&&origin.origin!==`http://127.0.0.1:${port}`)||(mode==='hosted'&&origin.protocol!=='https:')){
     throw Error('Set PORT and the exact Harbor origin for the selected mode.');
   }
   return {origin,port,host:mode==='hosted'?'::':'127.0.0.1'};
+}
+
+// Keys are explicit public origins. Mapping one never makes it a CRM sign-in origin.
+export function landingDomains(env){
+  const raw=env.HARBOR_LANDING_DOMAINS;
+  if(!raw)return new Map();
+  const value=JSON.parse(raw);
+  if(!value||Array.isArray(value)||typeof value!=='object')throw Error('Set HARBOR_LANDING_DOMAINS to an origin-to-workspace JSON object.');
+  const domains=new Map();
+  for(const [origin,workspace] of Object.entries(value)){
+    const url=URL.parse(origin);
+    const loopback=portableMode(env)==='local'&&url?.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname);
+    if(!url||url.origin!==origin||origin===env.HARBOR_LOGIN_ORIGIN||url.protocol!=='https:'&&!loopback||
+       typeof workspace!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(workspace))
+      throw Error('Each landing domain needs its own exact HTTPS origin and workspace UUID.');
+    domains.set(origin,workspace.toLowerCase());
+  }
+  return domains;
 }

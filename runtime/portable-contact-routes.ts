@@ -1,3 +1,4 @@
+import {readHistoryResponse,readWorkItemResponse,readAuditedRecords,recordPreviewAccess,type RecordAccessActor} from '../db/postgres/record-access-store';
 import {ZodError,type output} from 'zod';
 import {ApiError} from '../lib/api-error';
 import {saveContact} from '../db/postgres/contact-store';
@@ -48,7 +49,7 @@ async function readInput(request:Request){
 const taskExportLimit=500;
 const taskCsvHeaders={'cache-control':'private, no-store','x-content-type-options':'nosniff'};
 
-async function exportTaskCsv(db:ReturnType<typeof portableDb>,user:{userId:string;guest:boolean},query:Record<string,string>,head:boolean){
+async function exportTaskCsv(db:ReturnType<typeof portableDb>,user:RecordAccessActor&{guest:boolean},query:Record<string,string>,head:boolean){
   const {export:format,...filters}=query;
   const error=(message:string,status:number)=>Response.json({error:message},{status,headers:taskCsvHeaders});
   if(user.guest||filters.workspaceId!==undefined)return error('Export tasks from your own workspace.',403);
@@ -68,13 +69,16 @@ async function exportTaskCsv(db:ReturnType<typeof portableDb>,user:{userId:strin
   const line=(values:unknown[])=>values.map(value=>exportCsvCell(value)).join(',');
   const columns=['Task ID','Name','Task type','Status','Priority','Due date','Due time','Time zone','Due at (UTC)',
     'Assignee','Queue','Linked record type','Linked record ID','Linked record','Notes','Completed at','Created at','Updated at'];
+  const exportedRecords:{kind:string;id:string}[]=page.records.map(task=>({kind:'tasks',id:task.id}));
   const rows=page.records.map(task=>{
     const {name,taskType,status,priority,dueDate,dueTime,dueTimeZone,dueAt,notes}=task.data;
     const linked=taskLinkTarget(task);
+    if(linked)exportedRecords.push(linked);
     return line([task.id,name,taskType,status,priority,dueDate,dueTime,dueTimeZone,dueAt,task.assigneeLabel,
       task.queueId?queueNames.get(task.queueId):null,linked?portableRecordLabels[linked.kind]:null,linked?.id,
       task.contactName??task.companyName??task.dealName,notes,task.completedAt,task.createdAt,task.updatedAt]);
   });
+  await recordPreviewAccess(db,user,'csv',exportedRecords);
   return new Response([line(columns),...rows].join('\r\n')+'\r\n',{headers});
 }
 
@@ -88,30 +92,38 @@ async function recordsRoute(request:Request){
       const query=Object.fromEntries(params);
       if(query.export!==undefined){
         const head=request.method==='HEAD';
-        return await (query.kind==='tasks'?exportTaskCsv(db,user,query,head):portableRecordCsv(db,user,query,head));
+        const exportCsv=query.kind==='tasks'?exportTaskCsv:portableRecordCsv;
+        return await db.transaction(tx=>exportCsv(tx,user,query,head),{isolationLevel:'repeatable read'});
       }
       if(query.history!==undefined){
         const input=portablePropertyHistoryQuery.safeParse(query);
         if(!input.success)return json({error:'Invalid property history query.'},400);
-        const page=await readPortablePropertyHistory(db,user.userId,input.data);
+        const filters=input.data;
+        const page=await readHistoryResponse(db,user,request.method,filters.workspaceId,tx=>readPortablePropertyHistory(tx,user.userId,filters),
+          ()=>[{kind:filters.kind,recordIds:[filters.history]}]);
         return page?json(page):json({error:'Record not found.'},404);
       }
       if(query.completionHistoryFor!==undefined){
         const input=portableTaskCompletionRead.safeParse(query);
         if(!input.success)return json({error:'Invalid task history query.'},400);
-        const page=await readPortableTaskCompletions(db,user.userId,input.data);
-        return page?json(page):json({error:'Contact not found.'},404);
+        const filters=input.data;
+        const page=await readHistoryResponse(db,user,request.method,filters.workspaceId,tx=>readPortableTaskCompletions(tx,user.userId,filters),
+          result=>[{kind:filters.recordKind,recordIds:[filters.completionHistoryFor]},
+            {kind:'tasks',recordIds:[...new Set(result.items.map(task=>task.id))]}]);
+        return page?json(page):json({error:input.data.recordKind==='deals'?'Deal not found.':'Contact not found.'},404);
       }
       const input=(query.kind==='tasks'?portableTaskRead:portableRecordRead).safeParse(query);
       if(!input.success)return json({error:'Invalid record query.'},400);
-      if(input.data.workspaceId&&!await sharedWorkspaceGrant(db,user.userId,input.data.workspaceId))
+      if(input.data.workspaceId&&!await sharedWorkspaceGrant(db,user.userId,input.data.workspaceId,true))
         return json({error:'Shared workspace unavailable.'},404);
       if(input.data.kind==='tasks'){
-        const result=await readPortableTasks(db,user.userId,input.data);
+        const taskQuery=input.data;
+        const result=await readWorkItemResponse(db,user,'tasks',taskQuery.workspaceId,request.method,
+          tx=>readPortableTasks(tx,user.userId,taskQuery));
         return result?json(result):json({error:'Task not found.'},404);
       }
       const read=portableRecordReaders[input.data.kind];
-      const result=await read(db,user.userId,input.data);
+      const result=request.method==='GET'?await readAuditedRecords(db,user,input.data.kind,input.data):await read(db,user.userId,input.data);
       return result?json(result):json({error:portableRecordLabels[input.data.kind]+' not found.'},404);
     }
     let shared:SharedRecordWriteScope|undefined;
@@ -128,17 +140,19 @@ async function recordsRoute(request:Request){
       const result=await assignPortableRecordOwners(db,user.userId,owners.data,shared);
       if('changed' in result)return json(result);
       if(result.error==='access')return json({error:'You no longer have edit access for this workspace. Refresh before trying again.'},403);
-      if(result.error==='assignee_missing')return json({error:'Choose an active workspace editor or the owner.'},409);
+      if(result.error==='assignee_missing')return json({error:'Choose the workspace owner or a teammate who can edit '+owners.data.kind+'.'},409);
       if(result.error==='records_missing')return json({error:'Some selected records are no longer available. Refresh and select again.'},404);
       return json({error:'Some selected records changed. Refresh and select again. No records were updated.'},409);
     }
     const task=portableTaskWrite.safeParse(body);
     if(task.success){
+      if(task.data.outreach?.aircall&&process.env.HARBOR_PORTABLE_AIRCALL_ENABLED!=='true')
+        return json({error:'Aircall is unavailable. Refresh the task before logging.'},409);
       const result=await savePortableTask(db,user.userId,task.data,shared);
       if('record' in result)return json({record:result.record,nextTaskId:result.nextTaskId},'id' in task.data?200:201);
       if(result.error==='queue_scope')return json({error:'Task queues belong to the workspace owner.'},403);
       if(result.error==='queue_missing')return json({error:'Task queue not found.'},404);
-      if(result.error==='assignee_missing')return json({error:'Choose an active workspace editor or the owner.'},409);
+      if(result.error==='assignee_missing')return json({error:'Choose the workspace owner or a teammate who can edit tasks.'},409);
       if(result.error==='related_missing')return json({error:'Linked record not found in this workspace.'},404);
       if(result.error==='contact_missing')return json({error:'Contact not found in this workspace.'},404);
       if(result.error==='access')return json({error:'You no longer have edit access for this workspace. Refresh before trying again.'},403);
@@ -163,14 +177,14 @@ async function recordsRoute(request:Request){
     const result=data.kind==='contacts'?await saveContact(db,user.userId,data,shared,{gmailSender}):
       data.kind==='companies'?await saveCompany(db,user.userId,data,shared):await saveDeal(db,user.userId,data,shared);
     if('error' in result&&result.error==='access')return json({error:'You no longer have edit access for this workspace. Refresh before trying again.'},403);
-    if('error' in result&&result.error==='assignee_missing')return json({error:'Choose an active workspace editor or the owner.'},409);
-    if('error' in result&&result.error==='company_missing')return json({error:'Company not found in this workspace.'},404);
+    if('error' in result&&result.error==='assignee_missing')return json({error:'Choose the workspace owner or a teammate who can edit '+data.kind+'.'},409);
+    if('error' in result&&result.error==='company_missing')return json({error:shared?'Changing this company link requires edit access to the records involved.':'Company not found in this workspace.'},404);
     if('error' in result&&result.error==='stage_required')return json({
       error:missingDealStageMessage(result.stageName,result.fields),fields:result.fields,
     },400);
     if('error' in result&&result.error==='stage_invalid')return json({error:'Choose a valid stage for this pipeline.'},400);
     if('error' in result&&result.error==='stage_missing')return json({error:'Stage not found in this workspace and pipeline.'},404);
-    if('error' in result&&result.error==='contact_missing')return json({error:'Contact not found in this workspace.'},404);
+    if('error' in result&&result.error==='contact_missing')return json({error:shared?'Changing this contact link requires edit access to the records involved.':'Contact not found in this workspace.'},404);
     if('error' in result)return result.error==='missing'?json({error:label+' not found.'},404):
       json({error:'This '+label.toLowerCase()+' changed. Reload it before saving.',code:'stale_revision'},409);
     return json({record:result.record},'id' in data?200:201);

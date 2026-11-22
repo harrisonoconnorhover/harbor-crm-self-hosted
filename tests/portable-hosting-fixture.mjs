@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {execFile,execFileSync,spawn,spawnSync} from 'node:child_process';
 import {once} from 'node:events';
 import {createConnection,createServer} from 'node:net';
+import {rootCertificates} from 'node:tls';
 import {createServer as createHttpServer} from 'node:http';
 import {createServer as createHttpsServer} from 'node:https';
 import {createHash,randomUUID} from 'node:crypto';
@@ -34,7 +35,8 @@ export function portableDoctor(env,profile,code=0,providerProbe,probeFlag=provid
   assert.equal(report.profile,profile);
   assert.equal(report.result,code?'needs_setup':'ready');
   for(const value of [env.DATABASE_URL,env.HARBOR_LOGIN_GOOGLE_CLIENT_ID,env.HARBOR_LOGIN_GOOGLE_CLIENT_SECRET,
-    env.HARBOR_LOGIN_ALLOWED_EMAILS,env.HARBOR_S3_ENDPOINT,env.HARBOR_S3_SECRET_ACCESS_KEY,env.HARBOR_PORTABLE_GMAIL_OWNER,
+    env.HARBOR_LOGIN_SAML_ISSUER,env.HARBOR_LOGIN_SAML_ENTRY_POINT,env.HARBOR_LOGIN_SAML_CERT,env.HARBOR_LOGIN_SAML_BINDINGS,
+    env.HARBOR_LOGIN_SAML_ATTEMPT_SECRET,env.HARBOR_LOGIN_ALLOWED_EMAILS,env.HARBOR_S3_ENDPOINT,env.HARBOR_S3_SECRET_ACCESS_KEY,env.HARBOR_PORTABLE_GMAIL_OWNER,
     env.HARBOR_PORTABLE_GMAIL_CLIENT_ID,env.HARBOR_PORTABLE_GMAIL_CLIENT_SECRET,env.HARBOR_PORTABLE_GMAIL_REFRESH_TOKEN,
     env.HARBOR_PORTABLE_CALENDAR_OWNER,env.HARBOR_PORTABLE_CALENDAR_CLIENT_ID,env.HARBOR_PORTABLE_CALENDAR_CLIENT_SECRET,
     env.HARBOR_PORTABLE_CALENDAR_REFRESH_TOKEN,env.HARBOR_PORTABLE_INBOX_OWNER,env.HARBOR_PORTABLE_INBOX_CLIENT_ID,
@@ -269,7 +271,8 @@ async function verifyRestrictedNoteWorker(env,sql){
   assert.ok(contact,'A fictional Contact is available for the restricted worker test.');
   const {workspace_id:workspaceId,id:contactId,revision,owner_id:ownerId,last_job_claim_at:lastClaim}=contact;
   const [plainId,firstId,nextId,workflowId]=Array.from({length:4},()=>randomUUID());
-  const ids=[plainId,firstId,nextId];
+  const [branchWorkflow,rootJob,hookJob,pathId,hookAction]=Array.from({length:5},()=>randomUUID());
+  const ids=[plainId,firstId,nextId,rootJob,hookJob];
   const name='Fictional restricted Note workflow';
   const steps=[
     {id:randomUUID(),name:'First Note',body:'Fictional first restricted Note',delayMinutes:0},
@@ -312,14 +315,43 @@ async function verifyRestrictedNoteWorker(env,sql){
     assert.equal(Number(successor.scheduled_for)-Number(successor.finished_at),60_000);
     await sql`UPDATE portable_jobs SET available_at=0 WHERE workspace_id=${workspaceId} AND id=${nextId}`;
     await run(nextId,steps[1].body);
+    // A Notes-only worker must persist the next action without dispatching the webhook.
+    const note={kind:'note',body:'Fictional restricted branch Note',delayMinutes:0};
+    const webhook={kind:'webhook',destination:'fictional-receiver',delayMinutes:2,waitForLifecycle:'Customer'};
+    const path={id:pathId,name:'Fictional path',action:note,then:[{id:hookAction,action:webhook}]};
+    await sql.begin(async tx=>{
+      await tx`INSERT INTO portable_deal_workflows(workspace_id,id,revision,definition)
+        VALUES (${workspaceId},${branchWorkflow},1,${tx.json({name,trigger:'manual_contact',actionKind:'conditional_paths',
+          paths:[{...path,mode:'all',conditions:[{field:'name',operator:'known',value:''}]}],
+          otherwise:{id:randomUUID(),name:'Otherwise',action:note}})})`;
+      await tx`INSERT INTO portable_workflow_activations(workspace_id,workflow_id) VALUES (${workspaceId},${branchWorkflow})`;
+      await tx`INSERT INTO portable_jobs(workspace_id,id,contact_id,actor_id,kind,body,scheduled_for,available_at,created_at)
+        VALUES (${workspaceId},${rootJob},${contactId},${ownerId},'note',${note.body},0,0,0)`;
+      await tx`INSERT INTO portable_workflow_path_receipts(workspace_id,job_id,path_id,path_name)
+        VALUES (${workspaceId},${rootJob},${pathId},${path.name})`;
+      await tx`INSERT INTO portable_workflow_path_steps
+        (workspace_id,run_id,position,action_id,action,planned_job_id,job_id,workflow_id,workflow_revision,object_kind,record_id,record_revision)
+        VALUES (${workspaceId},${rootJob},0,${pathId},${tx.json(note)},${rootJob},${rootJob},${branchWorkflow},1,'contacts',${contactId},${revision}),
+               (${workspaceId},${rootJob},1,${hookAction},${tx.json(webhook)},${hookJob},NULL,${branchWorkflow},1,'contacts',${contactId},${revision})`;
+    });
+    await run(rootJob,note.body);
+    const [admitted]=await sql`SELECT j.id,j.status,j.attempts,j.wait_for_lifecycle,p.path_id,h.destination
+      FROM portable_workflow_path_steps s
+      JOIN portable_jobs j ON (j.workspace_id,j.id)=(s.workspace_id,s.job_id)
+      JOIN portable_workflow_path_receipts p ON (p.workspace_id,p.job_id)=(s.workspace_id,s.job_id)
+      JOIN portable_workflow_webhook_jobs h ON (h.workspace_id,h.job_id)=(s.workspace_id,s.job_id)
+      WHERE s.workspace_id=${workspaceId} AND s.run_id=${rootJob} AND s.position=1`;
+    assert.deepEqual(admitted,{id:hookJob,status:'queued',attempts:0,wait_for_lifecycle:'Customer',path_id:pathId,destination:webhook.destination});
   }finally{
     await sql.begin(async tx=>{
+      await tx`DELETE FROM portable_workflow_path_steps WHERE workspace_id=${workspaceId} AND run_id=${rootJob}`;
+      await tx`DELETE FROM portable_workflow_activations WHERE workspace_id=${workspaceId} AND workflow_id=${branchWorkflow}`;
       await tx`DELETE FROM portable_manual_workflow_run_actions WHERE workspace_id=${workspaceId} AND run_id=${firstId}`;
       await tx`DELETE FROM portable_manual_workflow_runs WHERE workspace_id=${workspaceId} AND id=${firstId}`;
       await tx`DELETE FROM portable_notes WHERE workspace_id=${workspaceId} AND job_id=ANY(${ids}::uuid[])`;
       await tx`DELETE FROM portable_job_attempts WHERE workspace_id=${workspaceId} AND job_id=ANY(${ids}::uuid[])`;
       await tx`DELETE FROM portable_jobs WHERE workspace_id=${workspaceId} AND id=ANY(${ids}::uuid[])`;
-      await tx`DELETE FROM portable_deal_workflows WHERE workspace_id=${workspaceId} AND id=${workflowId}`;
+      await tx`DELETE FROM portable_deal_workflows WHERE workspace_id=${workspaceId} AND id IN (${workflowId},${branchWorkflow})`;
       await tx`UPDATE private_workspaces SET last_job_claim_at=${lastClaim} WHERE id=${workspaceId}`;
     });
   }
@@ -370,6 +402,24 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
   assert.deepEqual(web.checks,{webOrigin:'ok',googleSignIn:'ok',gmail:'disabled',database:'ok',
     storage:hasStorage?'ok':'optional_unconfigured'});
   assert.equal(web.personalGoogleCallbackUrls,undefined);
+  assert.equal(web.samlCallbackUrl,undefined);
+  const samlOnly={...disabled,HARBOR_LOGIN_GOOGLE_CLIENT_ID:'',HARBOR_LOGIN_GOOGLE_CLIENT_SECRET:'',
+    HARBOR_LOGIN_SAML_ISSUER:'https://idp.example.test/tenant',HARBOR_LOGIN_SAML_ENTRY_POINT:'https://idp.example.test/sso',
+    HARBOR_LOGIN_SAML_CERT:rootCertificates[0],
+    HARBOR_LOGIN_SAML_BINDINGS:JSON.stringify({'fixture-owner':'owner@example.test'}),
+    HARBOR_LOGIN_SAML_ATTEMPT_SECRET:Buffer.alloc(32,7).toString('base64url')};
+  const company=portableDoctor(samlOnly,'web');
+  assert.deepEqual([company.checks.samlSignIn,company.checks.googleSignIn],['ok','disabled']);
+  assert.equal(company.samlCallbackUrl,disabled.HARBOR_LOGIN_ORIGIN+'/auth/saml/callback');
+  assert.equal(company.samlMetadataUrl,disabled.HARBOR_LOGIN_ORIGIN+'/auth/saml/metadata');
+  const delegated={...samlOnly,HARBOR_PORTABLE_INVITE_SIGN_IN_ENABLED:'true',HARBOR_SAML_DIRECTORY_AUTHORITY_WORKSPACE_ID:randomUUID(),HARBOR_SAML_DIRECTORY_EMAIL_DOMAIN:'employer.example'};
+  assert.equal(portableDoctor(delegated,'web').checks.samlDirectoryAuthority,'ok');
+  assert.equal(portableDoctor({...delegated,HARBOR_SAML_DIRECTORY_AUTHORITY_WORKSPACE_ID:''},'web',1).checks.samlDirectoryAuthority,'invalid_saml_directory_authority');
+  const mixed={...samlOnly,HARBOR_LOGIN_GOOGLE_CLIENT_ID:disabled.HARBOR_LOGIN_GOOGLE_CLIENT_ID,
+    HARBOR_LOGIN_GOOGLE_CLIENT_SECRET:disabled.HARBOR_LOGIN_GOOGLE_CLIENT_SECRET};
+  assert.equal(portableDoctor(mixed,'web').checks.googleSignIn,'ok');
+  const partial=portableDoctor({...mixed,HARBOR_LOGIN_SAML_CERT:''},'web',1);
+  assert.deepEqual([partial.checks.samlSignIn,partial.checks.googleSignIn],['invalid_sign_in_settings','ok']);
   verifyPersonalGoogleDoctor(disabled,personalGmailSettings,['ok','disabled',undefined]);
   verifyPersonalGoogleDoctor(disabled,personalCalendarSettings,['disabled','ok',undefined]);
   verifyPersonalGoogleDoctor(disabled,{},['disabled','disabled','missing_personal_google_clients'],1);
@@ -471,8 +521,19 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
     await sql`GRANT SELECT (workspace_id,contact_id,revision,previous,data) ON public.contact_events TO ${sql(role)}`;
     await sql`GRANT SELECT (workspace_id,form_id,id,contact_id,status) ON public.portable_lead_inquiries TO ${sql(role)}`;
     await sql`GRANT UPDATE (job_id) ON public.portable_manual_workflow_run_actions TO ${sql(role)}`;
+    assert.equal(portableDoctor(limited,'worker',1).checks.database,'missing_runtime_permissions');
+    await sql`GRANT SELECT, INSERT ON public.portable_workflow_path_receipts TO ${sql(role)}`;
+    await sql`GRANT SELECT, UPDATE (job_id) ON public.portable_workflow_path_steps TO ${sql(role)}`;
+    await sql`GRANT INSERT ON public.portable_task_jobs, public.portable_workflow_webhook_jobs TO ${sql(role)}`;
+    await sql`GRANT SELECT (workspace_id,id,revision), UPDATE (revision) ON public.portable_deal_workflows TO ${sql(role)}`;
+    await sql`GRANT SELECT (workspace_id,workflow_id) ON public.portable_workflow_activations TO ${sql(role)}`;
     assert.equal(portableDoctor(limited,'worker').checks.database,'ok');
     const noteGrants=[
+      'UPDATE (job_id) ON public.portable_workflow_path_steps',
+      'INSERT ON public.portable_workflow_path_receipts',
+      'UPDATE (revision) ON public.portable_deal_workflows',
+      'INSERT ON public.portable_workflow_webhook_jobs',
+      'INSERT ON public.portable_task_jobs',
       'SELECT ON public.portable_lead_form_note_sources',
       'SELECT ON public.portable_manual_workflow_run_actions',
       'INSERT ON public.portable_jobs',
@@ -521,8 +582,6 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
     assert.equal(segmentCheck(1),'missing_segment_worker_permissions');
     await sql`GRANT DELETE ON public.portable_segment_workflow_members TO ${sql(role)}`;
     assert.equal(segmentCheck(),'ok');
-    assert.equal(segmentCheck(1,'--check-tasks'),'missing_segment_worker_permissions');
-    await sql`GRANT INSERT ON public.portable_task_jobs TO ${sql(role)}`;
     assert.equal(segmentCheck(0,'--check-tasks'),'ok');
     await sql`REVOKE UPDATE ON public.portable_worker_heartbeat FROM ${sql(role)}`;
     assert.equal(portableDoctor(limited,'worker',1).checks.database,'missing_runtime_permissions');
@@ -534,13 +593,15 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
     await sql`GRANT INSERT (token_hash,user_id,created_at,expires_at) ON public.login_sessions TO ${sql(role)}`;
     await sql`GRANT SELECT (token_hash,user_id,expires_at), UPDATE (created_at), DELETE
       ON public.login_sessions TO ${sql(role)}`;
-    await sql`GRANT SELECT (google_subject,microsoft_subject), INSERT (id,google_subject,microsoft_subject,email,full_name,created_at,updated_at),
+    await sql`GRANT SELECT (google_subject,microsoft_subject,oidc_subject,saml_subject,saml_directory_issuer,oidc_directory_issuer,directory_authority), INSERT (id,google_subject,microsoft_subject,oidc_subject,saml_subject,saml_directory_issuer,oidc_directory_issuer,directory_authority,email,full_name,created_at,updated_at),
       UPDATE (email,full_name,updated_at) ON public.login_identities TO ${sql(role)}`;
     await sql`GRANT SELECT (scope,subject,minute,used), INSERT (scope,subject,minute,used),
       UPDATE (minute,used) ON public.portable_request_budgets TO ${sql(role)}`;
     assert.equal(portableDoctor(limited,'web',1).checks.database,'missing_runtime_permissions');
     await sql`GRANT SELECT (state_hash,expires_minute), INSERT (state_hash,expires_minute),
       UPDATE (expires_minute), DELETE ON public.portable_login_attempt_uses TO ${sql(role)}`;
+    assert.equal(portableDoctor(limited,'web',1).checks.database,'missing_runtime_permissions');
+    await sql`GRANT INSERT ON public.portable_workflow_path_steps TO ${sql(role)}`;
     assert.equal(portableDoctor(limited,'web').checks.database,'ok');
     const loginGrants=[
       'UPDATE (used) ON public.portable_request_budgets',
@@ -548,6 +609,9 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
       'UPDATE (expires_minute) ON public.portable_login_attempt_uses',
       'SELECT (google_subject) ON public.login_identities',
       'SELECT (microsoft_subject) ON public.login_identities',
+      'SELECT (saml_subject) ON public.login_identities',
+      'INSERT (saml_subject) ON public.login_identities',
+      'SELECT (saml_directory_issuer) ON public.login_identities',
       'UPDATE (created_at) ON public.login_sessions',
       'DELETE ON public.login_sessions',
     ];
@@ -562,24 +626,39 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
     assert.equal(workspaceCheck(1),missingWorkspaceGrants);
     // Prove column grants are sufficient even though the earlier worker fixture needs table SELECT.
     await sql`REVOKE SELECT ON public.private_workspaces FROM ${sql(role)}`;
-    await sql`GRANT SELECT (id,owner_id), INSERT (id,owner_id,last_job_claim_at,last_task_repeat_at,last_form_note_promotion_at)
+    await sql`GRANT SELECT (id,owner_id), INSERT (id,owner_id,last_sales_sequence_at,last_job_claim_at,last_task_repeat_at,last_form_note_promotion_at,last_lead_routing_at)
       ON public.private_workspaces TO ${sql(role)}`;
-    await sql`GRANT SELECT (id,workspace_id,email,role,expires_at), INSERT (id,workspace_id,email,role,expires_at),
+    await sql`GRANT SELECT (id,workspace_id,email,role,expires_at,view_scope,edit_scope), INSERT (id,workspace_id,email,role,expires_at,view_scope,edit_scope),
       UPDATE (id,role), DELETE ON public.portable_workspace_invites TO ${sql(role)}`;
-    await sql`GRANT SELECT (workspace_id,viewer_id,id,contact_files,scheduled_notes,contact_outreach,record_activities,role),
-      INSERT (workspace_id,viewer_id,id,contact_files,scheduled_notes,contact_outreach,record_activities,role),
-      UPDATE (id,role,contact_files,scheduled_notes,contact_outreach,record_activities), DELETE
+    await sql`GRANT SELECT (workspace_id,viewer_id,id,contact_files,scheduled_notes,contact_outreach,record_activities,role,backup_admin,team_id,view_scope,edit_scope),
+      INSERT (workspace_id,viewer_id,id,contact_files,scheduled_notes,contact_outreach,record_activities,role,backup_admin,team_id,view_scope,edit_scope),
+      UPDATE (id,role,contact_files,scheduled_notes,contact_outreach,record_activities,backup_admin,team_id,view_scope,edit_scope), DELETE
       ON public.portable_workspace_viewers TO ${sql(role)}`;
+    await sql`GRANT SELECT (id,workspace_id,user_id,saml_issuer,oidc_issuer,saml_external_id,display_name), INSERT (id,workspace_id,user_id,saml_issuer,oidc_issuer,saml_external_id,display_name), DELETE ON public.portable_directory_users TO ${sql(role)}`;
+    await sql`GRANT SELECT, INSERT, UPDATE (name,name_key,parent_id,revision), DELETE ON public.portable_workspace_teams TO ${sql(role)}`;
+    assert.equal(workspaceCheck(1),missingWorkspaceGrants);
+    await sql`GRANT SELECT (workspace_id,visible_team_id) ON public.portable_custom_properties TO ${sql(role)}`;
+    await sql`GRANT SELECT, INSERT, UPDATE (restricted,visible_team_id,revision) ON public.portable_standard_property_access TO ${sql(role)}`;
+    await sql`GRANT SELECT (workspace_id,team_id) ON public.portable_directory_groups TO ${sql(role)}`;
+    await sql`GRANT SELECT (workspace_id,user_id,group_id) ON public.portable_directory_group_members TO ${sql(role)}`;
     assert.equal(workspaceCheck(),'ok');
     const workspaceGrants=[
       'SELECT (owner_id) ON public.private_workspaces',
       'UPDATE (last_job_claim_at) ON public.private_workspaces',
+      'INSERT (last_sales_sequence_at) ON public.private_workspaces',
       'INSERT (last_form_note_promotion_at) ON public.private_workspaces',
+      'INSERT (last_lead_routing_at) ON public.private_workspaces',
       'INSERT (expires_at) ON public.portable_workspace_invites',
       'UPDATE (id) ON public.portable_workspace_invites',
       'DELETE ON public.portable_workspace_invites',
       'INSERT (record_activities) ON public.portable_workspace_viewers',
       'UPDATE (contact_files) ON public.portable_workspace_viewers',
+      'UPDATE (team_id) ON public.portable_workspace_viewers',
+      'UPDATE (parent_id) ON public.portable_workspace_teams',
+      'UPDATE (visible_team_id) ON public.portable_standard_property_access',
+      'SELECT (user_id) ON public.portable_directory_group_members',
+      'SELECT (saml_external_id) ON public.portable_directory_users',
+      'INSERT (saml_issuer) ON public.portable_directory_users',
       'DELETE ON public.portable_workspace_viewers',
     ];
     for(const grant of workspaceGrants){
@@ -587,6 +666,31 @@ export async function verifyPortableDoctor(env,sql,hasStorage,calendar){
       assert.equal(workspaceCheck(1),missingWorkspaceGrants,grant);
       await sql`GRANT ${sql.unsafe(grant)} TO ${sql(role)}`;
     }
+    assert.equal(workspaceCheck(),'ok');
+    const enterprise={...limited,HARBOR_PORTABLE_INVITE_SIGN_IN_ENABLED:'true',
+      HARBOR_LOGIN_MICROSOFT_TENANT_ID:randomUUID(),HARBOR_LOGIN_MICROSOFT_CLIENT_ID:randomUUID(),
+      HARBOR_LOGIN_MICROSOFT_CLIENT_SECRET:'fictional-directory-credential',
+      HARBOR_LOGIN_MICROSOFT_BINDINGS:JSON.stringify({[randomUUID()]:'owner@example.test'})};
+    const directoryCheck=(code=0)=>portableDoctor(enterprise,'web',code,undefined,'--check-workspace-access').checks.database;
+    assert.equal(directoryCheck(1),missingWorkspaceGrants);
+    await sql`GRANT SELECT (tenant,external_id,group_id,display_name), INSERT, UPDATE (group_id,display_name), DELETE
+      ON public.portable_directory_groups TO ${sql(role)}`;
+    await sql`GRANT INSERT, DELETE ON public.portable_directory_group_members TO ${sql(role)}`;
+    await sql`GRANT SELECT (workspace_id,issuer_id,id,token_hash,expires_at,revoked_at,scopes), UPDATE (name)
+      ON public.portable_api_tokens TO ${sql(role)}`;
+    assert.equal(directoryCheck(1),missingWorkspaceGrants,'Directory provisioning needs permission to save employee names.');
+    await sql`GRANT UPDATE (display_name) ON public.portable_directory_users TO ${sql(role)}`;
+    assert.equal(directoryCheck(),'ok');
+    const samlDirectoryCheck=(code=0)=>portableDoctor({...delegated,DATABASE_URL:limited.DATABASE_URL},'web',code,undefined,'--check-workspace-access').checks.database;
+    assert.equal(samlDirectoryCheck(1),missingWorkspaceGrants);
+    await sql`GRANT SELECT (saml_issuer,saml_group_name,saml_external_id), UPDATE (saml_external_id)
+      ON public.portable_directory_groups TO ${sql(role)}`;
+    assert.equal(samlDirectoryCheck(),'ok');
+    await sql`REVOKE UPDATE (saml_external_id) ON public.portable_directory_groups FROM ${sql(role)}`;
+    assert.equal(samlDirectoryCheck(1),missingWorkspaceGrants);
+    assert.equal(directoryCheck(),'ok');
+    await sql`REVOKE UPDATE (group_id) ON public.portable_directory_groups FROM ${sql(role)}`;
+    assert.equal(directoryCheck(1),missingWorkspaceGrants);
     assert.equal(workspaceCheck(),'ok');
     await sql`GRANT SELECT ON public.private_workspaces TO ${sql(role)}`;
     const missingPersonalGrants='missing_personal_google_permissions';

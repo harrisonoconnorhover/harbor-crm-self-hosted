@@ -15,5 +15,5 @@ export default async function PortablePublicLeadForm({params}:{params:Promise<{i
   if(!form)notFound();
   const {title,description,thankYou}=form.definition;
   const approvedEmbedOrigin=leadFormEmbedOrigin(form.definition.embedOrigin,portableMode(process.env));
-  return <PublicLeadForm form={{id,revision:form.revision,definition:{title,description,thankYou}}} approvedEmbedOrigin={approvedEmbedOrigin} newTabPrivacy/>;
+  return <PublicLeadForm form={{id,revision:form.revision,definition:{title,description,thankYou}}} approvedEmbedOrigin={approvedEmbedOrigin} newTabPrivacy portableJourney collectCountry={form.definition.collectCountry} collectRegion={form.definition.collectRegion}/>;
 }

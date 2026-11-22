@@ -1,0 +1,2 @@
+ALTER TABLE "portable_record_access_events" DROP CONSTRAINT "record_access_action";--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD CONSTRAINT "record_access_action" CHECK ("portable_record_access_events"."action" IN ('detail','list','csv','integration','search','report','related') AND (("portable_record_access_events"."token_id" IS NOT NULL) = ("portable_record_access_events"."action"='integration')));

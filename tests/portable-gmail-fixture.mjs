@@ -523,9 +523,11 @@ export async function verifyPortableScheduledGmail({request,origin,headers,other
       expiryRun=one();
       let blocked;
       for(let poll=0;poll<100&&!blocked;poll++){
-        [blocked]=await sql`SELECT (extract(epoch from query_start)*1000)::float8 AS started
-          FROM pg_stat_activity WHERE wait_event_type='Lock'
-          AND ${pid}::int=ANY(pg_blocking_pids(pid)) AND query LIKE 'select %"contacts"%'`;
+        // The sequence-access lookup can be the first query to touch the contact.
+        // Observe the actual read lock even when its query text or formatting changes.
+        [blocked]=await sql`SELECT (extract(epoch from waitstart)*1000)::float8 AS started
+          FROM pg_locks WHERE relation='public.contacts'::regclass AND mode='AccessShareLock'
+          AND NOT granted AND waitstart IS NOT NULL AND ${pid}::int=ANY(pg_blocking_pids(pid))`;
         if(!blocked)await delay(20);
       }
       assert.ok(blocked&&blocked.started<deadline,'The worker passed the first deadline check before waiting on the contact.');

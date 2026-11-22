@@ -1,3 +1,4 @@
+import {ownedRecordScope} from './record-ownership-scope';
 import {and,asc,desc,eq,gt,isNotNull,lt} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {contactFileVersions as versions} from './contact-file-schema';
@@ -45,8 +46,9 @@ export async function contactFile(db:PostgresJsDatabase,scope:Scope,id:string,ve
 
 export async function registerVersion(db:PostgresJsDatabase,scope:UploadScope,input:UploadVersion):Promise<Result>{
   return db.transaction(async tx=>{
-    if(await lockRecordWorkspace(tx,scope.actorId,false,scope.shared,'contactFiles')!==scope.workspaceId)return {status:'access'};
-    const [contact]=await tx.select({id:contacts.id}).from(contacts).where(and(contactScope(scope),activeContact)).for('update');
+    if(await lockRecordWorkspace(tx,scope.actorId,false,scope.shared,'contactFiles',true,true,['files',input.expectedVersion?'edit':'create'])!==scope.workspaceId)return {status:'access'};
+    const [contact]=await tx.select({id:contacts.id}).from(contacts).where(and(contactScope(scope),activeContact,
+      scope.shared?ownedRecordScope(tx,scope.actorId,scope.workspaceId,contacts,'edit','contactFiles'):undefined)).for('update');
     if(!contact)return {status:'missing'};
     const file=fileScopeFor(scope,input.fileId);
     const target=and(file,eq(versions.versionId,input.versionId));
@@ -69,8 +71,9 @@ export async function registerVersion(db:PostgresJsDatabase,scope:UploadScope,in
 export async function publishVersion(db:PostgresJsDatabase,scope:UploadScope,input:FileVersion):Promise<Result>{
   return db.transaction(async tx=>{
     // Storage runs between transactions, so the original grant may have been revoked.
-    if(await lockRecordWorkspace(tx,scope.actorId,false,scope.shared,'contactFiles')!==scope.workspaceId)return {status:'access'};
-    const [contact]=await tx.select({id:contacts.id}).from(contacts).where(and(contactScope(scope),activeContact)).for('update');
+    if(await lockRecordWorkspace(tx,scope.actorId,false,scope.shared,'contactFiles',true,true,['files',input.expectedVersion?'edit':'create'])!==scope.workspaceId)return {status:'access'};
+    const [contact]=await tx.select({id:contacts.id}).from(contacts).where(and(contactScope(scope),activeContact,
+      scope.shared?ownedRecordScope(tx,scope.actorId,scope.workspaceId,contacts,'edit','contactFiles'):undefined)).for('update');
     if(!contact)return {status:'missing'};
     const target=and(fileScopeFor(scope,input.fileId),eq(versions.versionId,input.versionId));
     const [registered]=await tx.select().from(versions).where(target).limit(1);

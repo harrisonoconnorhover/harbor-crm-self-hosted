@@ -1,3 +1,5 @@
+import type {MemberTool} from '../../lib/portable-tool-permissions';
+import {allToolWrites,toolWrite} from './member-tool-access';
 import {and,eq,exists} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {SharedRecordWriteScope,WorkspacePermission} from '../../lib/portable-workspace-access';
@@ -6,11 +8,18 @@ import {workspaceViewers} from './workspace-viewer-schema';
 
 type Transaction=Parameters<Parameters<PostgresJsDatabase['transaction']>[0]>[0];
 
-export async function lockRecordWorkspace(tx:Transaction,actorId:string,createIfMissing:boolean,shared?:SharedRecordWriteScope,permission?:WorkspacePermission|WorkspacePermission[],serializeJobs=false){
+export async function readOwnedWorkspaceId(db:PostgresJsDatabase,actorId:string){
+  const [workspace]=await db.select({id:privateWorkspaces.id}).from(privateWorkspaces)
+    .where(eq(privateWorkspaces.ownerId,actorId));
+  return workspace?.id;
+}
+
+export async function lockRecordWorkspace(tx:Transaction,actorId:string,createIfMissing:boolean,shared?:SharedRecordWriteScope,permission?:WorkspacePermission|WorkspacePermission[],serializeJobs=false,coreRecord=false,operation?:[MemberTool,'create'|'edit'|'delete'|'edit-all']){
   if(shared){
     const permissions=typeof permission==='string'?[permission]:permission??[];
     const eligible=and(eq(workspaceViewers.workspaceId,shared.workspaceId),eq(workspaceViewers.viewerId,actorId),
       eq(workspaceViewers.id,shared.grantId),eq(workspaceViewers.role,'editor'),
+      coreRecord?undefined:allToolWrites,operation?toolWrite(...operation):undefined,
       ...permissions.map(required=>eq(workspaceViewers[required],true)));
     const editor=tx.select({id:workspaceViewers.workspaceId}).from(workspaceViewers).where(eligible);
     if(serializeJobs){

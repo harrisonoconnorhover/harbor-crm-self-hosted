@@ -1,0 +1,5 @@
+.portable-defaults-form { max-width:38rem; }
+.portable-defaults-form fieldset { display:grid; gap:1rem; padding:0; border:0; min-width:0; }
+.portable-defaults-form label { display:grid; gap:.35rem; font-weight:600; }
+.portable-defaults-form p { margin:.25rem 0; }
+.portable-defaults-form button { justify-self:start; }

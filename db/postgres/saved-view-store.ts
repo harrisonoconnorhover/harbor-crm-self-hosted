@@ -1,3 +1,6 @@
+import {hiddenPropertyIds,propertyVisibleTo} from './record-property-access';
+import {hiddenStandardFields} from './standard-property-access';
+import {isRestrictableStandardField} from '../../lib/portable-standard-property-access';
 import {and,count,eq,inArray,ne,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {PortableRecordKind} from '../../lib/portable-records';
@@ -9,9 +12,18 @@ import {savedViews} from './saved-view-schema';
 import {loginIdentities} from './identity-schema';
 import type {SharedRecordWriteScope} from '../../lib/portable-workspace-access';
 import {privateWorkspaces} from './workspace-schema';
-import {recordWorkspaceScope} from './workspace-viewer-store';
+import {recordCatalogScope} from './workspace-viewer-store';
 
 const fields={id:savedViews.id,kind:savedViews.kind,name:savedViews.name,filters:savedViews.filters,columns:savedViews.columns,shared:savedViews.shared,revision:savedViews.revision};
+function viewFields(kind:PortableRecordKind,viewerId:string,workspaceId?:string){
+  if(!workspaceId)return fields;
+  const columns=sql<string[]|null>`CASE WHEN ${savedViews.columns} IS NOT NULL THEN
+    (SELECT coalesce(jsonb_agg(col ORDER BY position),'[]'::jsonb)
+      FROM jsonb_array_elements_text(${savedViews.columns}) WITH ORDINALITY AS entries(col,position)
+      WHERE col NOT IN (${hiddenStandardFields(workspaceId,kind,viewerId)})
+        AND coalesce(lower(substring(col from '^custom:(.*)$')),'') NOT IN (${hiddenPropertyIds(workspaceId,kind,viewerId)})) END`;
+  return {...fields,columns};
+}
 const kindScope=(workspaceId:string,kind:PortableRecordKind)=>
   and(eq(savedViews.workspaceId,workspaceId),eq(savedViews.kind,kind));
 
@@ -23,11 +35,12 @@ const author=sql<string|null>`(SELECT coalesce(nullif(trim(${loginIdentities.ful
 
 export async function listPortableSavedViews(db:PostgresJsDatabase,actorId:string,kind:PortableRecordKind,workspaceId?:string){
   const canReadOutreach=workspaceId&&kind==='contacts'
-    ?sql<boolean>`(${recordWorkspaceScope(db,actorId,workspaceId,'contactOutreach')})`:sql<boolean>`true`;
+    ?sql<boolean>`(${recordCatalogScope(db,actorId,workspaceId,'contactOutreach')})`:sql<boolean>`true`;
   // In a shared workspace an editor manages the views they created; the owner manages all of them.
   const mine=workspaceId?sql<boolean>`coalesce(${savedViews.authorId}=${actorId},false)`:sql<boolean>`false`;
-  const rows=await db.select({...fields,canReadOutreach,author,mine}).from(savedViews).innerJoin(privateWorkspaces,eq(savedViews.workspaceId,privateWorkspaces.id))
-    .where(and(recordWorkspaceScope(db,actorId,workspaceId),eq(savedViews.kind,kind),workspaceId?eq(savedViews.shared,true):undefined))
+  const rows=await db.select({...viewFields(kind,actorId,workspaceId),canReadOutreach,author,mine}).from(savedViews).innerJoin(privateWorkspaces,eq(savedViews.workspaceId,privateWorkspaces.id))
+    .where(and(recordCatalogScope(db,actorId,workspaceId),eq(savedViews.kind,kind),workspaceId?eq(savedViews.shared,true):undefined,
+      workspaceId&&kind==='deals'?sql`(NOT (${savedViews.filters} ? 'closeMonth') OR 'closeDate' NOT IN (${hiddenStandardFields(workspaceId,kind,actorId)}))`:undefined))
     .orderBy(sql`lower(${savedViews.name})`,savedViews.id).limit(portableSavedViewLimit);
   // Only an editor's own shared views are marked, so other responses keep their shape.
   return rows.map(({canReadOutreach,author,mine,...row})=>publicView({...(!canReadOutreach&&row.columns
@@ -64,10 +77,16 @@ export function writePortableSavedView(db:PostgresJsDatabase,actorId:string,inpu
         return {view:publicView(view)} as const;
       }
     }
+    if(shared&&(input.filters.closeMonth||input.columns?.some(id=>isRestrictableStandardField(input.kind,id)))){
+      const hidden=await tx.execute<{id:string}>(hiddenStandardFields(workspaceId,input.kind,actorId));
+      const selected=new Set(input.columns);
+      if(input.filters.closeMonth)selected.add('closeDate');
+      if(hidden.some(row=>selected.has(row.id)))return {error:'columns'} as const;
+    }
     const customIds=input.columns?.map(portableCustomColumnId).filter((id):id is string=>id!==undefined)??[];
     if(customIds.length){
       const found=await tx.select({id:properties.id}).from(properties).where(and(
-        eq(properties.workspaceId,workspaceId),eq(properties.kind,input.kind),inArray(properties.id,customIds)));
+        eq(properties.workspaceId,workspaceId),eq(properties.kind,input.kind),inArray(properties.id,customIds),shared?propertyVisibleTo(actorId):undefined));
       if(found.length!==customIds.length)return {error:'columns'} as const;
     }
     const [duplicate]=await tx.select({id:savedViews.id}).from(savedViews)
@@ -75,7 +94,7 @@ export function writePortableSavedView(db:PostgresJsDatabase,actorId:string,inpu
     if(duplicate)return {error:'duplicate'} as const;
     if(input.action==='update'){
       const [view]=await tx.update(savedViews).set({name:input.name,filters:input.filters,columns:input.columns,revision:input.expectedRevision+1})
-        .where(and(scope,eq(savedViews.id,input.id))).returning(fields);
+        .where(and(scope,eq(savedViews.id,input.id))).returning(viewFields(input.kind,actorId,shared?.workspaceId));
       return {view:publicView(view)} as const;
     }
     const [total]=await tx.select({count:count()}).from(savedViews).where(scope);

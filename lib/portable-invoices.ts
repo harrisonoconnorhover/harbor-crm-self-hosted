@@ -20,6 +20,14 @@ export const portableInvoiceWrite=z.discriminatedUnion('action',[
   z.object({action:z.literal('unapply'),id,revision,paymentId:id,reason:z.string().trim().min(1).max(2000)}).strict(),
 ]);
 export const portableInvoiceStatuses=['draft','open','partially_paid','paid','overdue','void'] as const;
+export const portablePaymentLedgerQuery=z.object({
+  view:z.literal('payments'),
+  status:z.enum(['all','applied','unapplied']).default('all'),
+  beforeDate:dateOnly.optional(),
+  beforeId:id.optional(),
+}).strict().refine(q=>Boolean(q.beforeDate)===Boolean(q.beforeId),'Both cursor values are required.');
+export type PaymentLedgerQuery=z.infer<typeof portablePaymentLedgerQuery>;
+
 const dueDate=dateOnly.refine(value=>value>='0001-01-01','Choose a date in year 0001 or later.');
 const portableInvoiceFilters=z.object({dealId:id.optional(),quoteId:id.optional(),q:z.string().trim().max(200).optional(),
   status:z.enum(['all',...portableInvoiceStatuses]).optional(),dueFrom:dueDate.optional(),dueThrough:dueDate.optional()}).strict()

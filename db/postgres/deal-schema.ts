@@ -1,3 +1,5 @@
+import {recordUpdatedKey} from './record-updated-key';
+import {activeListSearchIndex,customIdentifierIndex,recordSearchIndex} from './search-index';
 import {check,foreignKey,index,integer,jsonb,pgTable,primaryKey,text,timestamp,uuid} from 'drizzle-orm/pg-core';
 import type {DealFields} from '../../lib/portable-records';
 import {dealPipelineStages} from './deal-pipeline-schema';
@@ -20,6 +22,11 @@ export const deals=pgTable('deals',{
   createdAt:timestamp('created_at',{withTimezone:true,mode:'string'}).notNull(),
   updatedAt:timestamp('updated_at',{withTimezone:true,mode:'string'}).notNull(),
 },table=>[
+  index('deals_archived_time_page').on(table.workspaceId,recordUpdatedKey(table.archivedAt),table.id).where(sql`${table.archivedAt} IS NOT NULL`),
+  index('deals_recent_page').on(table.workspaceId,recordUpdatedKey(table.updatedAt),table.id).where(sql`${table.archivedAt} IS NULL`),
+  activeListSearchIndex('deals_list_search',table.archivedAt,sql`${table.data}->>'name'`),
+  customIdentifierIndex('deals_custom_identifier',table.data,table.archivedAt),
+  recordSearchIndex('deals_search_values',table.data,table.archivedAt),
   primaryKey({columns:[table.workspaceId,table.id]}),
   foreignKey({columns:[table.workspaceId,table.companyId],foreignColumns:[companies.workspaceId,companies.id]}),
   foreignKey({columns:[table.workspaceId,table.primaryContactId],foreignColumns:[contacts.workspaceId,contacts.id]}),

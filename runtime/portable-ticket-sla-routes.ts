@@ -1,3 +1,7 @@
+import {getResponsePolicy,saveResponsePolicy} from '../db/postgres/ticket-first-response-store';
+import {responsePolicyInput} from '../lib/first-response';
+import {ApiError} from '../lib/api-error';
+import {requestSessionHash} from './portable-identity';
 import {z} from 'zod';
 import {readPortableCloseSlaPolicy,savePortableCloseSlaPolicy} from '../db/postgres/portable-ticket-sla-store';
 import {readPortableTickets} from '../db/postgres/ticket-store';
@@ -16,6 +20,15 @@ async function ticketSlaRoute(request:Request){
     const params=new URL(request.url).searchParams;
     if(user.guest||params.has('workspaceId'))return json({error:'Open SLA settings in your own workspace.'},403);
     const db=portableDb();
+    if(params.get('kind')==='first-response'&&params.size===1){
+      if(request.method!=='POST')return json(await getResponsePolicy(db,user.userId));
+      const raw=await readBoundedRequestText(request,65536);
+      if(!raw)return json({error:'Check support hours and holidays.'},400);
+      const input=responsePolicyInput.parse(JSON.parse(raw));
+      const sessionHash=await requestSessionHash(request.headers);
+      if(!sessionHash)return json({error:'Sign in again.'},403);
+      return json(await saveResponsePolicy(db,{...user,sessionHash},input));
+    }
     if(request.method==='GET'||request.method==='HEAD'){
       const input=query.safeParse(Object.fromEntries(params));
       if(!input.success||params.size!==new Set(params.keys()).size)return json({error:'Invalid ticket SLA query.'},400);
@@ -34,7 +47,9 @@ async function ticketSlaRoute(request:Request){
     if(!input.success)return json({error:input.error.issues[0]?.message??'Check the close-time SLA targets.'},400);
     const policy=await savePortableCloseSlaPolicy(db,user.userId,input.data);
     return policy?json(policy):json({error:'The SLA settings changed. Reload them before saving.'},409);
-  }catch{
+  }catch(error){
+    if(error instanceof ApiError)return json({error:error.message},error.status);
+    if(error instanceof SyntaxError||error instanceof z.ZodError)return json({error:error instanceof z.ZodError?error.issues[0].message:'Invalid settings.'},400);
     return json({error:'Could not load or save SLA targets.'},503);
   }
 }

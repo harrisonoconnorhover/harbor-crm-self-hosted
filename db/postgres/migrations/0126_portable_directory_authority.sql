@@ -1,0 +1,2 @@
+ALTER TABLE "login_identities" ADD COLUMN "directory_authority" uuid;--> statement-breakpoint
+ALTER TABLE "login_identities" ADD CONSTRAINT "login_directory_authority_microsoft" CHECK ("login_identities"."directory_authority" IS NULL OR "login_identities"."microsoft_subject" IS NOT NULL);

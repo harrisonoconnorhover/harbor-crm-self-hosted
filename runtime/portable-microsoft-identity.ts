@@ -2,7 +2,9 @@ import {createRemoteJWKSet,customFetch,jwtVerify,type JWTVerifyGetKey} from 'jos
 import {z} from 'zod';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {sha256} from '../lib/email/crypto';
-import type {microsoftLoginConfig} from './portable-login-config';
+import {directoryAuthority,directoryCanBind,type microsoftLoginConfig} from './portable-login-config';
+import {directoryIdentity} from '../db/postgres/workspace-directory-access';
+import {portableDb} from './portable-db';
 
 type Config=ReturnType<typeof microsoftLoginConfig>;
 export const microsoftIdentityScopes='openid profile email';
@@ -32,10 +34,16 @@ export async function verifyMicrosoftIdentity(config:Config,idToken:string,nonce
   if(token.aud!==config.clientId||token.nonce!==nonce||token.tid.toLowerCase()!==config.tenant)
     throw Error('Microsoft identity does not match this sign-in.');
   // Microsoft explicitly treats email and preferred_username as mutable display claims.
-  // Only a locally pinned tenant + directory object identifies a Harbor address.
-  const objectId=token.oid.toLowerCase(),email=config.bindings.get(objectId);
+  // The verified tenant and object ID must match a configured or directory-provisioned address.
+  const objectId=token.oid.toLowerCase(),subject=config.tenant+':'+objectId;
+  let email=config.bindings.get(objectId);
+  const authority=directoryAuthority();
+  if(!email&&authority){
+    const provisioned=await directoryIdentity(portableDb(),authority.workspaceId,subject);
+    if(provisioned&&directoryCanBind(config,authority.workspaceId,provisioned))email=provisioned;
+  }
   if(!email)throw Error('Microsoft identity has no Harbor binding.');
-  return {subject:config.tenant+':'+objectId,email,fullName:token.name||null};
+  return {subject,email,fullName:token.name||null};
 }
 export async function exchangeMicrosoftIdentity(config:Config,code:string,verifier:string,nonce:string,fetcher:typeof fetch=fetch,
   key:JWTVerifyGetKey=signingKeys(config)){

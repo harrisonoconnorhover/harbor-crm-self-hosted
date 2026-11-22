@@ -1,0 +1,4 @@
+ALTER TABLE "portable_lead_routing_members" ADD COLUMN "additional_countries" varchar(100)[] DEFAULT '{}'::varchar[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_lead_routing_members" ADD CONSTRAINT "portable_routing_countries" CHECK (cardinality("portable_lead_routing_members"."additional_countries")<=49
+    AND (cardinality("portable_lead_routing_members"."additional_countries")=0 OR ("portable_lead_routing_members"."country"<>'' AND array_ndims("portable_lead_routing_members"."additional_countries")=1))
+    AND array_position("portable_lead_routing_members"."additional_countries",NULL) IS NULL AND array_position("portable_lead_routing_members"."additional_countries",'') IS NULL);

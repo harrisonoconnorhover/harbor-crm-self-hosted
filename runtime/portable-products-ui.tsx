@@ -1,9 +1,10 @@
 'use client';
 
+import {WorkspaceNumber} from './portable-workspace-format';
 import {useState,type FormEvent} from 'react';
 import {useRouter} from 'next/navigation';
 import {billingFrequencies,billingLabels,decimalToUnits,formatCents,type Product} from '../lib/commerce';
-import type {PortableProductPage,PortableProductQuery} from '../lib/portable-products';
+import {subscriberStatusLabels,type SubscriberPage,type PortableProductPage,type PortableProductQuery} from '../lib/portable-products';
 import {PortableCrmHeader} from './portable-crm-header';
 import './portable-contacts.css';
 
@@ -15,17 +16,80 @@ function productFilters({q,archived,billingFrequency}:PortableProductQuery){
   return params;
 }
 
-function productUrl(query:PortableProductQuery,{page=query.page,id,add}:{
-  page?:number;id?:string;add?:boolean;
+function productUrl(query:PortableProductQuery,{id,add,position=query}:{
+  id?:string;add?:boolean;position?:Pick<PortableProductQuery,'page'|'after'|'before'>;
 }={}){
   const params=productFilters(query);
-  if(page!==undefined)params.set('page',String(page));
+  if(position.page!==undefined)params.set('page',String(position.page));
+  if(position.after)params.set('after',position.after);
+  if(position.before)params.set('before',position.before);
   if(id)params.set('id',id);
   if(add)params.set('add','1');
   return '/products'+(params.size?'?'+params:'');
 }
 
-export function PortableProducts({email,product,page,query}:{email:string;product?:Product;page?:PortableProductPage;query:PortableProductQuery}){
+export function SubscriptionCheckout({product}:{product:Product}){
+  const [link,setLink]=useState<{url:string;mode:string}|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [copyMessage,setCopyMessage]=useState('');
+  async function copy(){
+    if(!link)return;
+    try{await navigator.clipboard.writeText(link.url);setCopyMessage('Checkout link copied.');}
+    catch{setCopyMessage('Use the Open subscription checkout link to copy its address.');}
+  }
+  async function check(){
+    setBusy(true);setLink(null);setError('');setCopyMessage('');
+    try{
+      const response=await fetch('/api/products?view=subscription&id='+product.id+'&revision='+product.revision,{cache:'no-store'});
+      if(!response.ok){
+        const data=await response.json() as {error?:string};
+        throw Error(data.error||'Could not verify checkout.');
+      }
+      setLink(await response.json() as {url:string;mode:'test'|'live'});
+    }catch(cause){setError(cause instanceof Error?cause.message:'Could not verify checkout.');}
+    finally{setBusy(false);}
+  }
+  return <section aria-label="Subscription checkout"><h2>Subscription checkout</h2>
+    <p><WorkspaceNumber kind="usd" value={product.unitPriceCents/100}>{formatCents(product.unitPriceCents)}</WorkspaceNumber> USD · {billingLabels[product.billingFrequency]} per unit. Stripe shows the buyer the final terms and handles renewals.</p>
+    <button type="button" disabled={busy} onClick={check}>{busy?'Checking Stripe…':'Check subscription link'}</button>
+    {error&&<p role="alert">{error}</p>}
+    {link&&<p role="status">Stripe {link.mode} mode · <a href={link.url} target="_blank" rel="noreferrer">Open subscription checkout</a>{' '}
+      <button type="button" onClick={()=>void copy()}>Copy checkout link</button> {copyMessage}</p>}
+  </section>;
+}
+
+export function ProductSubscribers({product}:{product:Product}){
+  const [page,setPage]=useState<SubscriberPage>();
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [cursor,setCursor]=useState<string>();
+  async function load(after?:string){
+    setBusy(true);setError('');setCursor(after);
+    try{
+      const params=new URLSearchParams({view:'subscribers',id:product.id,revision:String(product.revision)});
+      if(after)params.set('after',after);
+      const response=await fetch('/api/products?'+params,{cache:'no-store'});
+      if(!response.ok){
+        const result=await response.json() as {error?:string};
+        throw Error(result.error||'Could not read subscribers.');
+      }
+      setPage(await response.json() as SubscriberPage);
+    }catch(e){setPage(undefined);setError(e instanceof Error?e.message:'Could not read subscribers.');}
+    finally{setBusy(false);}
+  }
+  return <section aria-label="Stripe subscribers"><h2>Stripe subscribers</h2>
+    <p>Subscriptions started through this product’s configured checkout link.</p>
+    <button type="button" disabled={busy} onClick={()=>void load(cursor)}>{busy?'Checking Stripe…':error?'Retry':page?'Refresh subscribers':'View subscribers'}</button>
+    {error&&<p role="alert">{error}</p>}
+    {page&&<><p>Stripe {page.mode} mode</p>
+      {page.items.length?<dl>{page.items.map(row=><div key={row.subscriptionId}><dt>{row.email??'Checkout email unavailable'}</dt>
+        <dd><small style={{overflowWrap:'anywhere'}}>{row.subscriptionId}</small></dd>
+        <dd>{subscriberStatusLabels[row.status]}{row.status!=='canceled'&&(row.cancelAt?' · Cancels '+new Date(row.cancelAt*1000).toISOString().slice(0,10)+' (UTC)':
+          row.cancelAtPeriodEnd?' · Cancels at period end':'')}</dd></div>)}</dl>:<p>No completed subscription checkouts on this page.</p>}
+      {page.next&&<button type="button" disabled={busy} onClick={()=>void load(page.next!)}>Next subscribers</button>}</>}
+    {cursor&&<button type="button" disabled={busy} onClick={()=>void load()}>First subscribers</button>}
+  </section>;
+}
+
+export function PortableProducts({email,product,page,query,checkout,subscribers}:{subscribers?:boolean;checkout?:boolean;email:string;product?:Product;page?:PortableProductPage;query:PortableProductQuery}){
   const router=useRouter();
   const [requestId,setRequestId]=useState('');
   const [error,setError]=useState('');
@@ -98,14 +162,19 @@ export function PortableProducts({email,product,page,query}:{email:string;produc
       </form>
       <button type="button" onClick={download} disabled={busy}>{busy?'Preparing CSV…':'Export CSV'}</button>
       {error&&<p role="alert">{error}</p>}
-      <p>{page.total} products</p>
+      <p>{page.total===null?page.items.length+' products on this page':page.total+' products'}</p>
       <div className="portable-contacts-table"><table><thead><tr><th>Name</th><th>SKU</th><th>Price</th><th>Billing frequency</th></tr></thead>
         <tbody>{page.items.map(item=><tr key={item.id}><td><a href={productUrl(query,{id:item.id})}>{item.name}</a></td><td>{item.sku||'—'}</td>
-          <td>{formatCents(item.unitPriceCents)}</td><td>{billingLabels[item.billingFrequency]}</td></tr>)}</tbody>
+          <td><WorkspaceNumber kind="usd" value={item.unitPriceCents/100}>{formatCents(item.unitPriceCents)}</WorkspaceNumber></td><td>{billingLabels[item.billingFrequency]}</td></tr>)}</tbody>
       </table></div>
-      {page.page>0&&<a href={productUrl(query,{page:page.page-1})}>Previous products</a>}{' '}
-      {(page.page+1)*page.size<page.total&&<a href={productUrl(query,{page:page.page+1})}>Next products</a>}
+      <nav aria-label="Product pages">
+        {(query.before||query.after||Boolean(page.page))&&<a href={productUrl(query,{position:{}})}>First products</a>}{' '}
+        {page.previous&&<a href={productUrl(query,{position:{before:page.previous}})}>Previous products</a>}{' '}
+        {page.next&&<a href={productUrl(query,{position:{after:page.next}})}>Next products</a>}
+      </nav>
       </>:<>
+        {checkout&&product&&<SubscriptionCheckout product={product}/>}
+        {subscribers&&product&&<ProductSubscribers product={product}/>}
         {product?.archivedAt&&<p>Archived product</p>}
         <form onSubmit={submit}>
           <fieldset disabled={busy}>

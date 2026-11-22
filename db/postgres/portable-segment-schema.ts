@@ -1,5 +1,5 @@
 import {sql} from 'drizzle-orm';
-import {check,foreignKey,index,integer,jsonb,pgTable,primaryKey,text,timestamp,uuid} from 'drizzle-orm/pg-core';
+import {boolean,check,foreignKey,index,integer,jsonb,pgTable,primaryKey,text,timestamp,uuid} from 'drizzle-orm/pg-core';
 import type {PortableSegmentDefinition} from '../../lib/portable-segments';
 import {contacts} from './contact-schema';
 import {privateWorkspaces} from './workspace-schema';
@@ -10,6 +10,7 @@ export const portableSegments=pgTable('portable_segments',{
   revision:integer('revision').notNull(),
   mode:text('mode').$type<PortableSegmentDefinition['mode']>().notNull().default('active'),
   staticGeneration:uuid('static_generation'),
+  shared:boolean('shared').notNull().default(false),
   name:text('name').notNull(),
   description:text('description').notNull(),
   criteria:jsonb('criteria').$type<PortableSegmentDefinition['criteria']>().notNull(),

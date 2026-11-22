@@ -1,0 +1,1 @@
+ALTER TABLE "portable_segments" ADD COLUMN "shared" boolean DEFAULT false NOT NULL;

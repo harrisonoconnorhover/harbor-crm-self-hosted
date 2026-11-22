@@ -49,6 +49,15 @@ export async function portableCalendarFixture(directory){
         assert.equal(new Headers(options.headers).get('authorization'),'Bearer fictional-calendar-access');
         const window=JSON.parse(options.body);
         assert.deepEqual(Object.keys(window).sort(),['items','timeMax','timeMin']);
+        if(window.items[0]?.id!=='primary'){
+          const calendars={};
+          for(const {id} of window.items){
+            assert.ok(['owner@example.test','other@example.test'].includes(id));
+            calendars[id]=mode==='team_no_access'?{errors:[{reason:'notFound'}]}:
+              {busy:mode==='team_busy'?[{start:window.timeMin,end:window.timeMax}]:[]};
+          }
+          return Response.json({timeMin:window.timeMin,timeMax:window.timeMax,calendars});
+        }
         assert.deepEqual(window.items,[{id:'primary'}]);
         assert.ok(Date.parse(window.timeMax)>Date.parse(window.timeMin));
         await appendFile(log,'availability\\n');

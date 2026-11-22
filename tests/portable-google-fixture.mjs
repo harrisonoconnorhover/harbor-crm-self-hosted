@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {appendFile,readFile,writeFile} from 'node:fs/promises';
+import {appendFile,readFile,rename,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 
@@ -124,6 +124,12 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   const status=async(provider,session)=> (await request(endpoints(provider),{headers:session})).json();
   const data={};
   let codeCount=0;
+  // The simulated provider polls this file while requests are in flight.
+  async function publishState(){
+    const path=fixture.HARBOR_TEST_PERSONAL_GOOGLE;
+    await writeFile(path+'.next',JSON.stringify(data));
+    await rename(path+'.next',path);
+  }
   const calls=async()=>String(await readFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE_CALLS)).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
   await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE_CALLS,'');
   const start=async(provider,session,subject,mode)=>{
@@ -138,7 +144,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
     assert.equal(location.searchParams.get('redirect_uri'),origin+'/api/google/'+provider+'/callback');
     const code='personal-code-'+codeCount++;
     data[code]={challenge:location.searchParams.get('code_challenge'),provider,subject,mode};
-    await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+    await publishState();
     return '/api/google/'+provider+'/callback?'+new URLSearchParams({state:location.searchParams.get('state'),code});
   };
   const finish=async(path,session,options={})=>{
@@ -205,7 +211,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   const slowCalendarCallback=await start('calendar',other,'other','slow_callback');
   const beforeSlowCallbacks=(await calls()).length;
   data.slowCallbackIdentity='other';
-  await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+  await publishState();
   try{
     const providerWait={signal:AbortSignal.timeout(20_000)};
     const outcomes=await Promise.all([
@@ -228,7 +234,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
     assert.deepEqual(await calls(),afterSlowCallbacks,'Replayed callbacks must not contact Google.');
   }finally{
     delete data.slowCallbackIdentity;
-    await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+    await publishState();
   }
   assert.equal(await finish(await start('gmail',other,'other'),other),'connected');
   assert.notEqual((await status('gmail',other)).connection.id,priorGmail.connection.id);
@@ -239,7 +245,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   const checkGmail=endpoints('gmail')+'&action=check';
   data.slowRefresh='owner';
   data.slowProfile='other';
-  await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+  await publishState();
   try{
     const providerWait={signal:AbortSignal.timeout(18_000)};
     const [slowSearch,slowCheck]=await Promise.all([
@@ -253,7 +259,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   }finally{
     delete data.slowRefresh;
     delete data.slowProfile;
-    await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+    await publishState();
   }
 
   assert.equal((await search(other,ownerContact)).status,404);
@@ -271,7 +277,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   assert.equal((await save(other,ownerContact,item.selection)).status,404);
   assert.equal((await end('gmail',other,ownerGmail.id)).status,409);
   data.pauseBody='owner';
-  await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+  await publishState();
   const pendingSave=save(headers,ownerContact,item.selection);
   try{
     let holding=false;
@@ -283,7 +289,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
     assert.equal((await end('gmail',headers,ownerGmail.id)).status,200);
   }finally{
     delete data.pauseBody;
-    await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+    await publishState();
   }
   assert.equal((await pendingSave).status,409);
   assert.equal((await sql`SELECT id FROM portable_contact_activities WHERE contact_id=${ownerContact}`).length,0);
@@ -308,7 +314,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
 
   for(const upstream of [503,401]){
     data.gmailIndexFailure={subject:'owner',status:upstream};
-    await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+    await publishState();
     const failed=await search(headers,ownerContact);
     assert.equal(failed.status,upstream===401?409:503);
     if(upstream===401){
@@ -353,7 +359,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   assert.equal((await status('calendar',headers)).connection.needsReconnect,true);
   assert.equal(await finish(await start('calendar',headers,'owner'),headers),'connected');
   data.deniedFreeBusy='owner';
-  await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+  await publishState();
   const deniedPanel=await post(checkCalendar,headers,{});
   assert.equal(deniedPanel.status,409,'A revoked Calendar read after successful token refresh needs reconnection.');
   assert.match((await deniedPanel.json()).error,/^Reconnect your Google account/);
@@ -370,7 +376,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
     end:new Date(windowStart+900_000).toISOString(),timeZone:'UTC'};
   const beforeSlowCalendar=(await calls()).length;
   data.slowCalendar=true;
-  await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+  await publishState();
   try{
     const providerWait={signal:AbortSignal.timeout(20_000)};
     const [slowCheck,slowAvailability]=await Promise.all([
@@ -387,7 +393,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
     assert.equal((await status('calendar',other)).connection.needsReconnect,false);
   }finally{
     delete data.slowCalendar;
-    await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+    await publishState();
   }
   const healthyCheck=await post(checkCalendar,headers,{});
   assert.equal(healthyCheck.status,200);
@@ -399,7 +405,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   assert.equal((await (await post(availability,headers,window)).json()).availability,'busy');
   assert.equal((await (await post(availability,other,window)).json()).availability,'free');
   data.deniedFreeBusy='owner';
-  await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+  await publishState();
   const deniedAvailability=await post(availability,headers,window);
   assert.equal(deniedAvailability.status,409);
   assert.match((await deniedAvailability.json()).error,/^Reconnect your Google account/);
@@ -410,7 +416,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   const beforeRotation=(await status('calendar',headers)).connection.id;
   data.deniedFreeBusy='owner';
   data.holdDeniedFreeBusy=true;
-  await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+  await publishState();
   const staleRead=post(availability,headers,window);
   try{
     let held=false;
@@ -423,7 +429,7 @@ export async function verifyPersonalGoogle({request,origin,headers,other,signIn,
   }finally{
     delete data.deniedFreeBusy;
     delete data.holdDeniedFreeBusy;
-    await writeFile(fixture.HARBOR_TEST_PERSONAL_GOOGLE,JSON.stringify(data));
+    await publishState();
   }
   const staleResult=await staleRead;
   assert.equal(staleResult.status,409);

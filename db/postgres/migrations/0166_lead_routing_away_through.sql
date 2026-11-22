@@ -1,0 +1,1 @@
+ALTER TABLE "portable_lead_routing_members" ADD COLUMN "away_through" date;

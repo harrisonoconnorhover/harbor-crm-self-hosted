@@ -1,7 +1,6 @@
 import {bigint,boolean,check,foreignKey,index,integer,jsonb,pgTable,primaryKey,text,unique,uuid} from 'drizzle-orm/pg-core';
 import {sql} from 'drizzle-orm';
-import type {LeadFormPayload} from '../../lib/lead-forms';
-import type {LeadFormReviewReason,PortableLeadFormDefinition} from '../../lib/portable-lead-forms';
+import type {LeadFormReviewReason,PortableLeadFormDefinition,PortableLeadFormPayload} from '../../lib/portable-lead-forms';
 import {loginIdentities} from './identity-schema';
 import {privateWorkspaces} from './workspace-schema';
 
@@ -22,9 +21,10 @@ export const leadInquiries=pgTable('portable_lead_inquiries',{
   id:uuid('id').notNull(),
   formId:uuid('form_id').notNull(),
   receivedAt:bigint('received_at',{mode:'number'}).notNull(),
-  payload:jsonb('payload').$type<LeadFormPayload>(),
+  payload:jsonb('payload').$type<PortableLeadFormPayload>(),
   fingerprint:text('fingerprint'),
   status:text('status').$type<'created'|'linked'|'inbox_only'|'needs_review'|'removed'>().notNull(),
+  routeLeadRevision:integer('route_lead_revision'),
   reviewReason:text('review_reason').$type<LeadFormReviewReason>(),
   contactId:uuid('contact_id'),
   timelineNoteId:uuid('timeline_note_id'),
@@ -36,6 +36,11 @@ export const leadInquiries=pgTable('portable_lead_inquiries',{
   foreignKey({columns:[t.workspaceId,t.formId],foreignColumns:[leadForms.workspaceId,leadForms.id]}),
   index('portable_lead_inquiries_by_day').on(t.workspaceId,t.receivedAt),
   index('portable_lead_inquiries_by_form').on(t.workspaceId,t.formId,t.receivedAt,t.id),
+  index('portable_lead_inquiries_search').using('gin',
+    sql`(${t.payload}->>'name') public.gin_trgm_ops`,sql`(${t.payload}->>'email') public.gin_trgm_ops`)
+    .where(sql`${t.status} <> 'removed'`),
+  index('portable_lead_inquiries_open_page').on(t.workspaceId,t.receivedAt,t.id)
+    .where(sql`NOT ${t.handled} AND ${t.status} <> 'removed'`),
   index('portable_lead_inquiries_contact_timeline').on(t.workspaceId,t.contactId,t.receivedAt,t.timelineNoteId)
     .where(sql`${t.timelineNoteId} IS NOT NULL`),
 ]);

@@ -1,0 +1,2 @@
+ALTER TABLE "portable_custom_properties" DROP CONSTRAINT "portable_deal_property_audience";--> statement-breakpoint
+ALTER TABLE "portable_custom_properties" ADD CONSTRAINT "portable_record_property_audience" CHECK ((NOT "portable_custom_properties"."restricted" AND "portable_custom_properties"."visible_team_id" IS NULL) OR ("portable_custom_properties"."restricted" AND "portable_custom_properties"."kind" IN ('contacts','companies','deals')));

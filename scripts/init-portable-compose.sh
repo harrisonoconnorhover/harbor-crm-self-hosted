@@ -28,5 +28,8 @@ HARBOR_S3_SECRET_ACCESS_KEY=
 HARBOR_LOGIN_GOOGLE_CLIENT_ID=
 HARBOR_LOGIN_GOOGLE_CLIENT_SECRET=
 HARBOR_LOGIN_ALLOWED_EMAILS=
+
+# Active teammates plus pending invitations per workspace (1 to 150).
+# HARBOR_WORKSPACE_SEAT_LIMIT=25
 SETTINGS
 echo "Created $settings. Follow docs/self-host.md to configure the web app."

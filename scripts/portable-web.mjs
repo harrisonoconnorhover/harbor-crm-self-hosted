@@ -5,7 +5,7 @@ import {dirname,isAbsolute,join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
-import {portableBackupMaxAgeHours,portableMode,portableDatabaseUrl,portableStorageEndpoint,portableWebAddress} from '../runtime/portable-config.mjs';
+import {landingDomains,portableBackupMaxAgeHours,portableMode,portableDatabaseUrl,portableStorageEndpoint,portableWebAddress} from '../runtime/portable-config.mjs';
 
 const path=file=>fileURLToPath(new URL(file,import.meta.url));
 
@@ -356,7 +356,7 @@ if(command==='google-grant'){
   }
   const {values}=parseArgs({args:options,options:profile==='web'?
     {'before-google':{type:'boolean'},'check-google':{type:'boolean'},'check-calendar':{type:'boolean'},'check-inbox':{type:'boolean'},
-      'check-file-privacy':{type:'string'},'check-workspace-access':{type:'boolean'}}:
+      'saml-metadata':{type:'string'},'check-file-privacy':{type:'string'},'check-workspace-access':{type:'boolean'}}:
     {'check-gmail':{type:'boolean'},'expect-web-origin':{type:'string'},'check-tasks':{type:'boolean'},'check-segments':{type:'boolean'}}});
   if(values['expect-web-origin']!==undefined&&!values['check-gmail']){
     throw Error('Use --expect-web-origin with doctor worker --check-gmail.');
@@ -370,7 +370,7 @@ if(command==='google-grant'){
   const {portableDoctor}=await import('../.harbor/portable-build/worker/health.mjs');
   const report=await portableDoctor(profile,{beforeGoogle:values['before-google'],checkGoogle:values['check-google'],checkGmail:values['check-gmail'],
     checkCalendar:values['check-calendar'],checkTasks:values['check-tasks'],checkSegments:values['check-segments'],
-    checkInbox:values['check-inbox'],checkWorkspaceAccess:values['check-workspace-access'],privateFile,expectedWebOrigin:values['expect-web-origin']});
+    samlMetadataFile:values['saml-metadata'],checkInbox:values['check-inbox'],checkWorkspaceAccess:values['check-workspace-access'],privateFile,expectedWebOrigin:values['expect-web-origin']});
   console.log(JSON.stringify(report,null,2));
   if(report.result!=='ready'&&report.result!=='ready_for_google_setup')exitAfterFailure();
 }else if(command==='backup-service'||command==='backup-tick'||command==='backup-status'){
@@ -566,17 +566,24 @@ if(command==='google-grant'){
     console.error(JSON.stringify({event:'harbor_portable_gmail_reconciliation',result:'unavailable'}));
     process.exitCode=1;
   }
+}else if(command==='marketing'){
+  const {runMarketingCommand}=await import('../.harbor/portable-build/worker/marketing.mjs');
+  await runMarketingCommand(extra,url.href);
 }else if(!['migrate','start','worker'].includes(command)||(extra.length&&command!=='worker')){
-  throw Error('Expected release-info, doctor web [--before-google] [--check-google] [--check-calendar] [--check-inbox] [--check-file-privacy KEY] [--check-workspace-access], doctor worker [--check-gmail [--expect-web-origin ORIGIN]] [--check-tasks] [--check-segments], doctor restore [--bundle DIRECTORY], migrate, start, worker [--once] [--notes-only], worker-status [--expect-worker | --expect-full-worker | --expect-gmail-worker] [--poll-after UNIX_MS], web-status [--expect-build FINGERPRINT] [--prometheus-file /ABSOLUTE/FILE.prom], backup <backup directory> [--source DATABASE BUCKET], backup-service <backup directory>, monitor-status <backup directory> [--verify [--verify-timeout-seconds N]] [--calendar] [--web [--expect-build FINGERPRINT|packaged]] [--segments] [--form-notes] [--inquiry-follow-up] [--workflow-capacity] [--task-repeats] [--task-queue] [--expect-full-worker] [--gmail-queue] [--worker-off], or gmail-reconcile <workspace ID> <job ID>.');
+  throw Error('Expected release-info, doctor web [--before-google] [--check-google] [--check-calendar] [--check-inbox] [--check-file-privacy KEY] [--check-workspace-access] [--saml-metadata FILE], doctor worker [--check-gmail [--expect-web-origin ORIGIN]] [--check-tasks] [--check-segments], doctor restore [--bundle DIRECTORY], migrate, start, worker [--once] [--notes-only], worker-status [--expect-worker | --expect-full-worker | --expect-gmail-worker] [--poll-after UNIX_MS], web-status [--expect-build FINGERPRINT] [--prometheus-file /ABSOLUTE/FILE.prom], backup <backup directory> [--source DATABASE BUCKET], backup-service <backup directory>, monitor-status <backup directory> [--verify [--verify-timeout-seconds N]] [--calendar] [--web [--expect-build FINGERPRINT|packaged]] [--segments] [--form-notes] [--inquiry-follow-up] [--workflow-capacity] [--task-repeats] [--task-queue] [--expect-full-worker] [--gmail-queue] [--worker-off], or gmail-reconcile <workspace ID> <job ID>.');
 }else if(command==='migrate'){
   const {default:postgres}=await import('postgres');
   const {applyPortableMigrations,readPortableMigrations}=await import('../runtime/portable-migrations.mjs');
   const client=postgres(url.href,{max:1,connect_timeout:5,onnotice:()=>{}});
   let status;
   try{status=await applyPortableMigrations(client,readPortableMigrations(path('../db/postgres/migrations')));}
-  catch{throw Error('Could not apply portable Harbor Postgres migrations. Check the database and migration files.');}
+  catch(error){
+    if(error.code!=='55P03')throw Error('Could not apply portable Harbor Postgres migrations. Check the database and migration files.');
+    status='migration_lock_timeout';
+  }
   finally{await client.end({timeout:3});}
   const issues={
+    migration_lock_timeout:'A database lock blocked the upgrade. No migrations from this run were committed. Finish the conflicting transaction and retry.',
     maintenance_in_progress:'A Harbor worker, migration or restore holds the database lock. Stop workers before an upgrade and retry.',
     migration_history_mismatch:'Harbor migration history differs from this release. Check the release and database before retrying.',
     newer_release_required:'This database requires a newer Harbor release.',
@@ -606,7 +613,7 @@ if(command==='google-grant'){
 }else{
   const {origin,port,host}=portableWebAddress(process.env,mode);
   process.env.VINEXT_TRUST_PROXY=mode==='hosted'?'1':'0';
-  process.env.VINEXT_TRUSTED_HOSTS=mode==='hosted'?origin.host:'';
+  process.env.VINEXT_TRUSTED_HOSTS=mode==='hosted'?[origin.host,...Array.from(landingDomains(process.env).keys(),key=>new URL(key).host)].join(','):'';
   if(mode==='hosted'){
     portableStorageEndpoint(process.env,mode);
     const {validateHostedWebStorage}=await import('../.harbor/portable-build/worker/health.mjs');

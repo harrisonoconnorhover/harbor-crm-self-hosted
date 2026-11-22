@@ -1,0 +1,3 @@
+CREATE INDEX "contacts_custom_identifier" ON "contacts" USING gin (("data"->'custom') jsonb_path_ops) WHERE "contacts"."archived_at" IS NULL AND ("contacts"."data"->'custom') IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "companies_custom_identifier" ON "companies" USING gin (("data"->'custom') jsonb_path_ops) WHERE "companies"."archived_at" IS NULL AND ("companies"."data"->'custom') IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "deals_custom_identifier" ON "deals" USING gin (("data"->'custom') jsonb_path_ops) WHERE "deals"."archived_at" IS NULL AND ("deals"."data"->'custom') IS NOT NULL;

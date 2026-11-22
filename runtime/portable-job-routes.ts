@@ -16,7 +16,7 @@ const query=z.object({recordId:uuid,workspaceId:uuid.optional(),grantId:uuid.opt
 const note=z.object({id:uuid,body:z.string().trim().min(1).max(2_000),scheduledFor:epoch}).strict();
 const email=z.object({kind:z.literal('gmail'),id:uuid,recipient:suppressedAddress,subject:z.string().trim().min(1).max(200),
   body:z.string().trim().min(1).max(8000),scheduledFor:epoch}).strict();
-const cancel=z.object({action:z.enum(['cancelGmail','cancelNote','cancelTask']),id:uuid}).strict();
+const cancel=z.object({action:z.enum(['cancelGmail','cancelNote','cancelTask','cancelEventWait']),id:uuid}).strict();
 const retry=z.object({action:z.enum(['retryNote','retryTask']),id:uuid}).strict();
 const review=z.object({action:z.enum(['reviewGmail','reviewExternal']),id:uuid}).strict();
 const reviewFailed=z.object({action:z.enum(['reviewFailed','reviewSuppressedGmail']),id:uuid,attempts:z.number().int().nonnegative()}).strict();
@@ -42,9 +42,14 @@ async function route(request:Request){
       if(!parsed.success)return accessChanged();
       shared=parsed.data;
     }
-    const db=portableDb(),scope=await visibleContactScope(db,user.userId,recordId,workspaceId,'scheduledNotes');
-    if(!writing)return scope?json(await contactJobHistory(db,scope,
-      afterAt!==undefined&&afterId?{at:afterAt,id:afterId}:undefined,!!workspaceId)):contactMissing();
+    const db=portableDb();
+    if(!writing)return await db.transaction(async tx=>{
+      const scope=await visibleContactScope(tx,user.userId,recordId,workspaceId,'scheduledNotes');
+      if(!scope)return contactMissing();
+      const cursor=afterAt!==undefined&&afterId?{at:afterAt,id:afterId}:undefined;
+      return json(await contactJobHistory(tx,scope,cursor,!!workspaceId));
+    },{isolationLevel:'repeatable read',accessMode:'read only'});
+    const scope=await visibleContactScope(db,user.userId,recordId,workspaceId,'scheduledNotes');
     if(!scope&&shared)return contactMissing();
     let data:unknown;
     try{
@@ -76,8 +81,8 @@ async function route(request:Request){
         if(result==='full')return json({error:'This workspace already has 100 pending jobs.'},429);
         return json({id:job.id,result},202);
       }
-      const kind=job.action==='cancelGmail'?'gmail':job.action==='cancelTask'?'task':'note';
-      const label=kind==='gmail'?'Email':kind==='task'?'Task':'Note';
+      const kind=job.action==='cancelEventWait'?'external':job.action==='cancelGmail'?'gmail':job.action==='cancelTask'?'task':'note';
+      const label=kind==='external'?'Waiting action':kind==='gmail'?'Email':kind==='task'?'Task':'Note';
       if(shared)return json({error:'Only the workspace owner can cancel this '+label.toLowerCase()+'.'},403);
       const result=await cancelPortableJob(db,scope,user.userId,job.id,kind);
       if(result==='missing')return json({error:label+' not found.'},404);

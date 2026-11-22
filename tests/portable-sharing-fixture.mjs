@@ -92,7 +92,7 @@ export async function verifyPortableSharing({request,origin,headers,other,record
   assert.equal(viewers[0].role,'viewer');
   assert.deepEqual((await (await change(headers,grant)).json()).viewers,viewers);
   assert.deepEqual((await (await listing(other)).json()).shared,[{id:workspaceId,ownerEmail:'owner@example.test',
-    role:'viewer',contactFiles:false,scheduledNotes:false,contactOutreach:false,recordActivities:false,backupAdmin:false,grantId:viewers[0].id}]);
+    role:'viewer',meetingsVisible:false,contactFiles:false,scheduledNotes:false,contactOutreach:false,recordActivities:false,backupAdmin:false,grantId:viewers[0].id}]);
   assert.equal((await records({})).status,401);
   for(const [kind,item] of [['contacts',record],['companies',company],['deals',deal]]){
     const visible=await records(other,'&kind='+kind+'&id='+item.id);
@@ -246,7 +246,7 @@ export async function verifyPortableSharing({request,origin,headers,other,record
     assert.equal(response.status,200);
     return response.json();
   };
-  assert.deepEqual(await mine('&contactId='+record.id),{records:[createdTask],next:null});
+  assert.deepEqual(await mine('&contactId='+record.id),{records:[{...createdTask,editable:true}],next:null});
   for(const auth of [headers,other]){
     assert.deepEqual(await (await request(privateMine,{headers:auth})).json(),{records:[],next:null});
   }
@@ -278,7 +278,8 @@ export async function verifyPortableSharing({request,origin,headers,other,record
   assert.equal((await request(minePath+'&record='+createdTask.id,{headers:other})).status,404);
   assert.equal((await records(other,taskQuery)).status,200);
   assert.equal((await ownerTask(completeTask)).status,409);
-  assert.deepEqual(await (await request('/api/crm?kind=tasks&id='+createdTask.id,{headers})).json(),firstCompletion);
+  const ownerCompletion=await (await request('/api/crm?kind=tasks&id='+createdTask.id,{headers})).json();
+  assert.deepEqual(firstCompletion,{...ownerCompletion,editable:true});
   const taskEvents=await sql`SELECT revision,actor_id,workspace_id FROM portable_task_events
     WHERE task_id=${createdTask.id} ORDER BY revision`;
   assert.deepEqual(taskEvents.map(event=>[event.revision,event.actor_id,event.workspace_id]),[
@@ -371,7 +372,7 @@ export async function verifyPortableSharing({request,origin,headers,other,record
   const dealLinkPath='/?kind=tasks&workspaceId='+workspaceId+'&dealId='+deal.id;
   for(const [kind,recordKey,target,expected] of [['companies','companyId',company,restoredCompanyTask],['deals','dealId',deal,task]]){
     const filter='&kind=tasks&'+recordKey+'='+target.id;
-    assert.deepEqual((await (await records(other,filter)).json()).records,[expected]);
+    assert.deepEqual((await (await records(other,filter)).json()).records,[{...expected,editable:true}]);
     const privateList=await request('/api/crm?'+filter.slice(1),{headers:other});
     assert.deepEqual((await privateList.json()).records,[]);
     const detailPage=await request('/'+scoped+'&kind='+kind+'&record='+target.id,{headers:other});
@@ -459,8 +460,8 @@ export async function verifyPortableSharing({request,origin,headers,other,record
   const emptyTasks={records:[],next:null};
   assert.deepEqual(await unavailablePage(headers),emptyTasks);
   const firstMine=await mine('&limit=1');
-  assert.deepEqual(firstMine,{records:[mineExtra[0]],next:mineExtra[0].id});
-  assert.deepEqual(await mine('&limit=1&after='+firstMine.next),{records:[mineExtra[1]],next:null});
+  assert.deepEqual(firstMine,{records:[{...mineExtra[0],editable:true}],next:mineExtra[0].id});
+  assert.deepEqual(await mine('&limit=1&after='+firstMine.next),{records:[{...mineExtra[1],editable:true}],next:null});
   let racingWrite;
   await sql.begin(async tx=>{
     await tx`UPDATE portable_workspace_viewers SET role='viewer' WHERE id=${racingGrant.id}`;
@@ -475,7 +476,7 @@ export async function verifyPortableSharing({request,origin,headers,other,record
     assert.ok(waiting,'Shared edit should wait for the role change to commit');
   });
   assert.equal((await racingWrite).status,403);
-  assert.deepEqual(await mine(),{records:mineExtra,next:null});
+  assert.deepEqual(await mine(),{records:mineExtra.map(task=>({...task,editable:false})),next:null});
   const viewerMinePage=await request('/'+scoped+mineQuery,{headers:other});
   assert.equal(viewerMinePage.status,200);
   assert.match(await viewerMinePage.text(),/<a [^>]+>Editor first follow-up<\/a>/);
@@ -485,7 +486,7 @@ export async function verifyPortableSharing({request,origin,headers,other,record
   assert.deepEqual(unavailableFirst,{records:[firstMissing],next:firstMissing.id});
   assert.deepEqual(await unavailablePage(headers,{limit:'1',after:unavailableFirst.next}),{records:[secondMissing],next:null});
   assert.deepEqual(await unavailablePage(headers,{search:secondMissing.data.name}),{records:[secondMissing],next:null});
-  assert.deepEqual(await unavailablePage(other,{workspaceId}),{records:mineExtra,next:null});
+  assert.deepEqual(await unavailablePage(other,{workspaceId}),{records:mineExtra.map(task=>({...task,editable:false})),next:null});
   assert.deepEqual(await unavailablePage(other),emptyTasks);
   assert.equal((await unavailable(headers,{id:firstMissing.id})).status,400);
   assert.equal((await unavailable(other,{workspaceId,export:'csv'})).status,403);

@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-html-link-for-pages -- Portable CRM uses document navigation. */
 import {PortableRecordImport} from './portable-contact-import-ui';
 import {ArrowRight,FileSpreadsheet,Handshake,ListChecks,NotebookPen,Users} from 'lucide-react';
+import {PortableSettingsLayout} from './portable-settings-layout';
 import {PortableCrmHeader} from './portable-crm-header';
 import type {PortableCustomProperty} from '../lib/portable-custom-properties';
 import type {PortablePersonalGoogleReadiness} from './portable-google-config';
@@ -46,6 +47,7 @@ function PersonalGoogleSetup({google}:{google:SetupProvider[]}){
 export function PortableGettingStarted({email,customProperties,google}:{email:string;customProperties:PortableCustomProperty[];google?:SetupProvider[]}){
   return <main className="portable-contacts">
     <PortableCrmHeader email={email} page="getting-started"/>
+    <PortableSettingsLayout active="getting-started">
     <section className="portable-guide" aria-labelledby="getting-started-title">
       <div className="portable-guide-intro"><p className="portable-guide-kicker">Workspace guide</p>
         <h1 id="getting-started-title">Get started with Harbor</h1>
@@ -76,5 +78,6 @@ export function PortableGettingStarted({email,customProperties,google}:{email:st
       </section>
       <footer><a href="/privacy">Privacy notice</a> · <a href="/terms">Trial terms</a></footer>
     </section>
+    </PortableSettingsLayout>
   </main>;
 }

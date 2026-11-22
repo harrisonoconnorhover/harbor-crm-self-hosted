@@ -1,0 +1,1 @@
+CREATE INDEX "portable_leads_open_created" ON "portable_leads" USING btree ("workspace_id","created_at","id") WHERE "portable_leads"."archived_at" IS NULL AND "portable_leads"."deal_id" IS NULL AND "portable_leads"."data"->>'leadStage' NOT IN ('Qualified','Disqualified');

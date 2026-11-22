@@ -1,0 +1,4 @@
+ALTER TABLE "portable_lead_routing_members" DROP CONSTRAINT "portable_routing_limits";--> statement-breakpoint
+ALTER TABLE "portable_lead_routing_members" ADD CONSTRAINT "portable_routing_limits" CHECK ("portable_lead_routing_members"."capacity" BETWEEN 1 AND 10000 AND "portable_lead_routing_members"."revision">0
+    AND "portable_lead_routing_members"."days" BETWEEN 1 AND 127 AND "portable_lead_routing_members"."start_minute" BETWEEN 0 AND 1439 AND "portable_lead_routing_members"."end_minute" BETWEEN 1 AND 1440 AND "portable_lead_routing_members"."start_minute"<>"portable_lead_routing_members"."end_minute"
+    AND length("portable_lead_routing_members"."country")<=100 AND length("portable_lead_routing_members"."time_zone") BETWEEN 1 AND 100);

@@ -1,0 +1,4 @@
+ALTER TABLE "portable_custom_properties" ADD COLUMN "restricted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_custom_properties" ADD COLUMN "visible_team_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_custom_properties" ADD CONSTRAINT "portable_property_visible_team" FOREIGN KEY ("workspace_id","visible_team_id") REFERENCES "public"."portable_workspace_teams"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portable_custom_properties" ADD CONSTRAINT "portable_deal_property_audience" CHECK ((NOT "portable_custom_properties"."restricted" AND "portable_custom_properties"."visible_team_id" IS NULL) OR ("portable_custom_properties"."restricted" AND "portable_custom_properties"."kind"='deals'));

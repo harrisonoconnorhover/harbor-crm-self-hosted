@@ -1,3 +1,5 @@
+import {recordUpdatedKey} from './record-updated-key';
+import {activeListSearchIndex,customIdentifierIndex,recordSearchIndex} from './search-index';
 import {check,foreignKey,index,integer,jsonb,pgTable,primaryKey,text,timestamp,unique,uuid} from 'drizzle-orm/pg-core';
 import type {ContactFields} from '../../lib/portable-records';
 import {sql} from 'drizzle-orm';
@@ -19,6 +21,11 @@ export const contacts=pgTable('contacts',{
   createdAt:timestamp('created_at',{withTimezone:true,mode:'string'}).notNull(),
   updatedAt:timestamp('updated_at',{withTimezone:true,mode:'string'}).notNull(),
 },table=>[
+  index('contacts_archived_time_page').on(table.workspaceId,recordUpdatedKey(table.archivedAt),table.id).where(sql`${table.archivedAt} IS NOT NULL`),
+  index('contacts_recent_page').on(table.workspaceId,recordUpdatedKey(table.updatedAt),table.id).where(sql`${table.archivedAt} IS NULL`),
+  activeListSearchIndex('contacts_list_search',table.archivedAt,sql`${table.data}->>'name'`,sql`${table.data}->>'email'`),
+  customIdentifierIndex('contacts_custom_identifier',table.data,table.archivedAt),
+  recordSearchIndex('contacts_search_values',table.data,table.archivedAt),
   primaryKey({columns:[table.workspaceId,table.id]}),
   foreignKey({name:'contacts_merged_into_fk',columns:[table.workspaceId,table.mergedIntoId],foreignColumns:[table.workspaceId,table.id]}),
   check('contacts_merged_archived',sql`${table.mergedIntoId} IS NULL OR (${table.archivedAt} IS NOT NULL AND ${table.mergedIntoId}<>${table.id})`),

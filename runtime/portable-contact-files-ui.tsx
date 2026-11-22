@@ -1,5 +1,7 @@
 'use client';
 
+import {WorkspaceNumber} from './portable-workspace-format';
+import {WorkspaceDate} from './portable-workspace-format';
 import {useEffect,useState,type FormEvent} from 'react';
 import {MAX_ATTACHMENT_BYTES} from '../lib/activity-attachments';
 
@@ -47,8 +49,8 @@ function FileVersionHistory({base,entry}:{base:string;entry:Entry}){
       </p>:<>
         {page.versions.length?<ol>{page.versions.map((version,index)=><li key={version.versionId}>
           Version {version.revision}{before===undefined&&index===0?' (current)':''}{' · '}
-          <a href={fileHref(base,version)}>{version.name}</a> ({version.size.toLocaleString()} bytes)
-          {' · '}<time dateTime={version.createdAt}>{new Date(version.createdAt).toLocaleString()}</time>
+          <a href={fileHref(base,version)}>{version.name}</a> (<WorkspaceNumber value={version.size}>{version.size.toLocaleString()}</WorkspaceNumber> bytes)
+          {' · '}<time dateTime={version.createdAt}><WorkspaceDate value={version.createdAt}>{new Date(version.createdAt).toLocaleString()}</WorkspaceDate></time>
         </li>)}</ol>:<p>No older versions on this page.</p>}
         {before!==undefined&&<button type="button" onClick={()=>pageTo()}>Latest versions</button>}{' '}
         {next!=null&&<button type="button" onClick={()=>pageTo(next)}>Older versions</button>}
@@ -56,7 +58,7 @@ function FileVersionHistory({base,entry}:{base:string;entry:Entry}){
   </details>;
 }
 
-export function PortableContactFiles({recordId,workspaceId,grantId,readOnly}:{recordId:string;workspaceId?:string;grantId?:string;readOnly:boolean}){
+export function PortableContactFiles({recordId,workspaceId,grantId,readOnly,canCreate=true,canReplace=true}:{recordId:string;workspaceId?:string;grantId?:string;readOnly:boolean;canCreate?:boolean;canReplace?:boolean}){
   const [page,setPage]=useState<Page>();
   const [after,setAfter]=useState('');
   const [refresh,setRefresh]=useState(0);
@@ -85,6 +87,7 @@ export function PortableContactFiles({recordId,workspaceId,grantId,readOnly}:{re
     if(!file||file.size<1||file.size>MAX_ATTACHMENT_BYTES){setError('Choose a file of up to 10 MB.');return;}
     const form=event.currentTarget;
     const current=page?.files.find(row=>row.id===replace);
+    if(current?!canReplace:!canCreate){setError('Choose a permitted file operation.');return;}
     const pending=attempt??{file,fileId:current?.id??crypto.randomUUID(),versionId:crypto.randomUUID(),expectedVersion:current?.versionId};
     setAttempt(pending);
     setSaving(true);
@@ -125,23 +128,25 @@ export function PortableContactFiles({recordId,workspaceId,grantId,readOnly}:{re
 
   return <section id="portable-contact-files" className="portable-record-panel" aria-label="Contact files" tabIndex={-1}>
     <h2>Contact files</h2>
-    {!workspaceId&&<a href={'/?view=files&contactId='+recordId}>View in Files library</a>}
+    <a href={'/?'+new URLSearchParams({view:'files',contactId:recordId,...(workspaceId?{workspaceId}:{})})}>View in Files library</a>
     {!page&&!error&&<p>Loading files…</p>}
     {page&&(page.files.length?<ul>{page.files.map(entry=><li key={entry.id}>
-      <a href={fileHref(base,entry)}>{entry.name}</a> ({entry.size.toLocaleString()} bytes)
+      <a href={fileHref(base,entry)}>{entry.name}</a> (<WorkspaceNumber value={entry.size}>{entry.size.toLocaleString()}</WorkspaceNumber> bytes){' '}
+      {!workspaceId&&<a href={'/?'+new URLSearchParams({view:'record-access',action:'document',kind:'contacts',record:recordId,file:entry.id})}
+        aria-label={'Download history for '+entry.name}>Download history</a>}
       <FileVersionHistory key={entry.versionId} base={base} entry={entry}/>
     </li>)}</ul>:<p>No files on this page.</p>)}
     {after&&<button type="button" disabled={saving} onClick={()=>goTo('')}>First files</button>}{' '}
     {page?.next&&<button type="button" disabled={saving} onClick={()=>goTo(page.next!)}>Next files</button>}
-    {!readOnly&&<form onSubmit={upload}>
+    {!readOnly&&(canCreate||canReplace&&!!page?.files.length)&&<form onSubmit={upload}>
       <fieldset disabled={saving}>
         <label>Save as<select value={replace} onChange={event=>{setReplace(event.target.value);setAttempt(undefined);}}>
-          <option value="">New file</option>
-          {page?.files.map(entry=><option key={entry.id} value={entry.id}>Replace {entry.name}</option>)}
+          {canCreate?<option value="">New file</option>:<option value="" disabled>Choose a file to replace</option>}
+          {canReplace&&page?.files.map(entry=><option key={entry.id} value={entry.id}>Replace {entry.name}</option>)}
         </select></label>
         <label>File<input type="file" required onChange={event=>{setFile(event.target.files?.[0]);setAttempt(undefined);}}/></label>
       </fieldset>
-      <button type="submit" disabled={saving}>{saving?'Uploading…':'Upload file'}</button>
+      <button type="submit" disabled={saving||!canCreate&&!replace}>{saving?'Uploading…':'Upload file'}</button>
     </form>}
     {error&&<p role="alert">{error}</p>}
     {saved&&<p role="status">File saved. <a href={fileHref(base,saved)}>Download saved file</a></p>}

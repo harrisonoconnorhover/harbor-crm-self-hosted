@@ -1,3 +1,6 @@
+import {localFileFixture} from './portable-files-fixture.mjs';
+import {CreateBucketCommand} from '@aws-sdk/client-s3';
+import {directoryLifecycle} from './portable-directory-fixture.mjs';
 import assert from 'node:assert/strict';
 import {execFile,spawn} from 'node:child_process';
 import {once} from 'node:events';
@@ -18,9 +21,11 @@ const preload=fileURLToPath(new URL('./portable-microsoft-provider-fixture.mjs',
 const run=promisify(execFile),database=process.env.HARBOR_TEST_POSTGRES_URL;
 const owner='ms-owner@example.test',guest='ms-guest@example.test',legacy='legacy@example.test';
 const consumerTenant='9188040d-6c67-4c5b-b112-36a304b66dad';
+const employee='rep@fictional-company.example',employeeObj=crypto.randomUUID();
 const client=crypto.randomUUID(),tenant=crypto.randomUUID(),obj=crypto.randomUUID(),guestObj=crypto.randomUUID();
 
-test('Portable Microsoft sign-in through the built app, including pinned identities, invited access and Google coexistence',
+test(process.env.HARBOR_TEST_UPGRADE_BUNDLE?'Existing teammates sign in, edit shared records and lose revoked access after a pre-team upgrade':
+  'Portable Microsoft sign-in through the built app, including pinned identities, invited access and Google coexistence',
   {skip:!database,timeout:160000},async()=>{
     const url=new URL(database);
     assert.ok(['postgres:','postgresql:'].includes(url.protocol)&&url.hostname==='127.0.0.1'&&/^\/harbor_identity_test(?:_[a-z0-9]+)?$/.test(url.pathname),
@@ -34,6 +39,8 @@ test('Portable Microsoft sign-in through the built app, including pinned identit
       HARBOR_LOGIN_ALLOWED_EMAILS:[owner,legacy].join(','),HARBOR_LOGIN_MICROSOFT_TENANT_ID:tenant,HARBOR_LOGIN_MICROSOFT_CLIENT_ID:client,
       HARBOR_LOGIN_MICROSOFT_CLIENT_SECRET:'fixture-identity-secret',HARBOR_LOGIN_MICROSOFT_BINDINGS:JSON.stringify({[obj]:owner,[guestObj]:guest}),
       HARBOR_PORTABLE_INVITE_SIGN_IN_ENABLED:'true',HARBOR_TEST_MICROSOFT_IDENTITY_FIXTURE:file};
+    const files=localFileFixture();
+    if(files)Object.assign(env,files.env);
     const outlookSettings=outlookFixture(dir);
     Object.assign(env,outlookSettings);
     const pairs={google:await generateKeyPair('RS256'),microsoft:await generateKeyPair('RS256')};
@@ -93,6 +100,13 @@ test('Portable Microsoft sign-in through the built app, including pinned identit
       assert.ok(!response.headers.getSetCookie().some(value=>value.startsWith('harbor-session=')));
     }
     try{
+      if(files)await files.storage.send(new CreateBucketCommand({Bucket:files.bucket}));
+      if(process.env.HARBOR_TEST_UPGRADE_BUNDLE){
+        const {verifyTeamUpgrade}=await import('./portable-team-upgrade-fixture.mjs');
+        await verifyTeamUpgrade({admin,address:url,files,env,tenant,ownerEmail:owner,deputyEmail:guest,
+          ownerObject:obj,deputyObject:guestObj,restart,login,request,json});
+        return;
+      }
       await admin`CREATE DATABASE ${admin(name)}`;created=true;url.pathname='/'+name;
       env.DATABASE_URL=url.href;sql=postgres(url.href,{max:1,onnotice:()=>{}});
       await run(process.execPath,['scripts/portable-web.mjs','migrate'],{cwd:root,env});
@@ -183,9 +197,13 @@ test('Portable Microsoft sign-in through the built app, including pinned identit
       assert.equal(signOut.status,303);assert.equal((await protectedRead(invited)).status,401);
 
       env.HARBOR_LOGIN_GOOGLE_CLIENT_ID='google-fixture';env.HARBOR_LOGIN_GOOGLE_CLIENT_SECRET='google-fixture-secret';
+      env.HARBOR_DIRECTORY_AUTHORITY_WORKSPACE_ID=workspace;env.HARBOR_DIRECTORY_EMAIL_DOMAIN='fictional-company.example';
+      env.HARBOR_WORKSPACE_SEAT_LIMIT='150';
       const dual=await restart();assert.match(dual,/Continue with Microsoft/);assert.match(dual,/Continue with Google/);
       assert.equal((await protectedRead(active)).status,200);
       const google=await login('google');assert.equal((await request('/api/crm?id='+record.id,{headers:{cookie:google}})).status,404);
+      await rejected(await prepare('microsoft',{oid:employeeObj,email:employee}));
+      await directoryLifecycle({request,json,login,sql,tenant,peerEmail:legacy,ownerCookie:active,secondOwner:google,employee,employeeObj,record,workspace,hasFiles:!!files,origin,assertLoginDenied:async()=>rejected(await prepare('microsoft',{oid:employeeObj}))});
       await outlook.connect({cookie:google},'outlook-calendar',legacy);
       await rejected(await prepare('google',{sub:'different-google',email:owner}),'account_conflict');
       const collision=crypto.randomUUID();
@@ -195,12 +213,56 @@ test('Portable Microsoft sign-in through the built app, including pinned identit
       const [{count}]=await sql`SELECT count(*)::int AS count FROM login_identities WHERE email=${legacy}`;assert.equal(count,1);
       env.HARBOR_LOGIN_MICROSOFT_BINDINGS=JSON.stringify({[collision]:legacy});await restart();
       assert.equal((await protectedRead(active)).status,401);
+      await verifyDirectoryOnly({request,json,login,prepare,rejected,restart,env,google,runDoctor:async()=>
+        JSON.parse((await run(process.execPath,['scripts/portable-web.mjs','doctor','web'],{cwd:root,env})).stdout)});
       env.HARBOR_LOGIN_MICROSOFT_TENANT_ID=consumerTenant;
       env.HARBOR_LOGIN_MICROSOFT_BINDINGS=JSON.stringify({[obj]:'personal@example.test'});env.HARBOR_LOGIN_ALLOWED_EMAILS='personal@example.test';
       await restart();assert.equal((await protectedRead(await login('microsoft'))).status,200);
     }finally{
+      files?.storage.destroy();
       await stop();await sql?.end({timeout:3});
       if(created)await admin`DROP DATABASE ${admin(name)}`;
       await admin.end({timeout:3});await rm(dir,{recursive:true,force:true});
     }
   });
+
+async function verifyDirectoryOnly({request,json,login,prepare,rejected,restart,env,google,runDoctor}){
+  const workspace=(await (await request('/api/workspaces',{headers:{cookie:google}})).json()).owned;
+  env.HARBOR_DIRECTORY_AUTHORITY_WORKSPACE_ID=workspace;
+  env.HARBOR_LOGIN_MICROSOFT_BINDINGS='{}';
+  assert.match(await restart(),/Continue with Microsoft/);
+  const doctor=await runDoctor();
+  assert.equal(doctor.checks.microsoftDirectoryAuthority,'ok');
+  const key=await json('/api/api-tokens',{purpose:'directory',name:'Employee directory only',days:30},google);
+  assert.equal(key.status,201,await key.clone().text());
+  const {token}=await key.json();
+  const externalId=crypto.randomUUID(),userName='field-rep@fictional-company.example';
+  const directory=(method,suffix,body)=>request('/scim/v2/Users'+suffix,{method,headers:{
+    authorization:'Bearer '+token,'content-type':'application/scim+json'},body:body&&JSON.stringify(body)});
+  const claims={oid:externalId,email:userName};
+  await rejected(await prepare('microsoft',claims));
+  const created=await directory('POST','',{schemas:['urn:ietf:params:scim:schemas:core:2.0:User'],externalId,userName,active:true});
+  assert.equal(created.status,201,await created.clone().text());
+  const employeeId=(await created.json()).id;
+  const cookie=await login('microsoft',claims);
+  const spaces=()=>request('/api/workspaces',{headers:{cookie}});
+  const admitted=await spaces();
+  assert.equal(admitted.status,200,await admitted.clone().text());
+  assert.deepEqual((await admitted.json()).shared.map(s=>s.id),[workspace]);
+  const removed=await directory('PATCH','/'+employeeId,{schemas:['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+    Operations:[{op:'replace',path:'active',value:false}]});
+  assert.equal(removed.status,200,await removed.clone().text());
+  assert.equal((await spaces()).status,401);
+  await rejected(await prepare('microsoft',claims));
+  const googleClient=env.HARBOR_LOGIN_GOOGLE_CLIENT_ID;
+  delete env.HARBOR_LOGIN_GOOGLE_CLIENT_ID;
+  assert.doesNotMatch(await restart(503),/Continue with Microsoft/);
+  env.HARBOR_LOGIN_GOOGLE_CLIENT_ID=googleClient;
+  const domain=env.HARBOR_DIRECTORY_EMAIL_DOMAIN;
+  delete env.HARBOR_DIRECTORY_EMAIL_DOMAIN;
+  assert.doesNotMatch(await restart(),/Continue with Microsoft/);
+  assert.equal((await request('/auth/microsoft/start')).status,404);
+  env.HARBOR_DIRECTORY_EMAIL_DOMAIN=domain;
+  env.HARBOR_LOGIN_MICROSOFT_TENANT_ID=consumerTenant;
+  assert.doesNotMatch(await restart(),/Continue with Microsoft/);
+}

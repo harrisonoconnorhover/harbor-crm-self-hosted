@@ -1,3 +1,4 @@
+import {WorkspaceNumber} from './portable-workspace-format';
 import type {DealPipeline} from '../lib/portable-deal-pipelines';
 import type {DealStageTotals} from '../lib/portable-records';
 
@@ -5,12 +6,13 @@ export type DealSummaryData={pipeline:DealPipeline;totals:DealStageTotals[]};
 const amountFormat=new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const outcomes={open:'Open',won:'Won',lost:'Lost'};
 
-export function PortableDealSummary({summary,pipelines,workspaceId,closeMonth}:{
-  summary:DealSummaryData;pipelines:DealPipeline[];workspaceId?:string;closeMonth?:string;
+export function PortableDealSummary({summary,pipelines,workspaceId,closeMonth,showCloseDate}:{
+  summary:DealSummaryData;pipelines:DealPipeline[];workspaceId?:string;closeMonth?:string;showCloseDate:boolean;
 }){
   const {pipeline,totals}=summary;
   const byStage=new Map(totals.map(row=>[row.stageId,row]));
   const total=byStage.get(null);
+  const showAmount=total?.amount!=null;
   function summaryLink(month?:string){
     const query=new URLSearchParams({kind:'deals',view:'summary',pipelineId:pipeline.id});
     if(workspaceId)query.set('workspaceId',workspaceId);
@@ -23,9 +25,13 @@ export function PortableDealSummary({summary,pipelines,workspaceId,closeMonth}:{
     if(closeMonth)query.set('closeMonth',closeMonth);
     return '/?'+query;
   }
+  const forecast=new URLSearchParams({view:'forecast',pipelineId:pipeline.id});
+  if(workspaceId)forecast.set('workspaceId',workspaceId);
+  if(closeMonth&&closeMonth!=='undated')forecast.set('month',closeMonth);
   return <section aria-labelledby="portable-summary-title">
     <h2 id="portable-summary-title">{pipeline.name} summary</h2>
-    <p>Weighted open amounts multiply each open deal’s saved amount by its stage probability. Closed deals still count toward the Amount total.</p>
+    {showAmount&&showCloseDate&&<a href={'/?'+forecast}>Open monthly forecast</a>}
+    {showAmount&&<p>Weighted open amounts multiply each open deal’s saved amount by its stage probability. Closed deals still count toward the Amount total.</p>}
     <form action="/" method="get" aria-label="Pipeline summary filters">
       <input name="kind" type="hidden" value="deals"/>
       <input name="view" type="hidden" value="summary"/>
@@ -33,26 +39,26 @@ export function PortableDealSummary({summary,pipelines,workspaceId,closeMonth}:{
       <label>Pipeline<select name="pipelineId" defaultValue={pipeline.id}>
         {pipelines.map(option=><option key={option.id} value={option.id}>{option.name}</option>)}
       </select></label>
-      <label>Close month<input name="closeMonth" type="month" min="0001-01" max="9999-12"
-        defaultValue={closeMonth==='undated'?undefined:closeMonth}/></label>
+      {showCloseDate&&<label>Close month<input name="closeMonth" type="month" min="0001-01" max="9999-12"
+        defaultValue={closeMonth==='undated'?undefined:closeMonth}/></label>}
       <button type="submit">Show summary</button>
     </form>
-    <nav aria-label="Close date shortcuts">
+    {showCloseDate&&<><nav aria-label="Close date shortcuts">
       <a href={summaryLink()} aria-current={!closeMonth?'page':undefined}>All close dates</a>
       <a href={summaryLink('undated')} aria-current={closeMonth==='undated'?'page':undefined}>No close date</a>
     </nav>
-    <p>{closeMonth==='undated'?'Deals without a close date':closeMonth?'Deals closing in '+closeMonth:'Deals across all close dates'}</p>
+    <p>{closeMonth==='undated'?'Deals without a close date':closeMonth?'Deals closing in '+closeMonth:'Deals across all close dates'}</p></>}
     <div className="portable-contacts-table"><table>
-      <thead><tr><th scope="col">Stage</th><th scope="col">Outcome</th><th scope="col">Deals</th><th scope="col">Amount</th>
-        <th scope="col">Probability</th><th scope="col">Weighted open</th></tr></thead>
+      <thead><tr><th scope="col">Stage</th><th scope="col">Outcome</th><th scope="col">Deals</th>{showAmount&&<th scope="col">Amount</th>}
+        <th scope="col">Probability</th>{showAmount&&<th scope="col">Weighted open</th>}</tr></thead>
       <tbody>{pipeline.stages.map(stage=>{
         const row=byStage.get(stage.id);
         return <tr key={stage.id}><th scope="row"><a href={stageLink(stage.id)}>{stage.name}</a></th>
-          <td>{outcomes[stage.outcome]}</td><td>{row?.dealCount??0}</td><td>{amountFormat.format(row?.amount??0)}</td>
-          <td>{stage.probability}%</td><td>{stage.outcome==='open'?amountFormat.format(row?.weightedOpen??0):'—'}</td></tr>;
+          <td>{outcomes[stage.outcome]}</td><td>{row?.dealCount??0}</td>{showAmount&&<td><WorkspaceNumber kind="money" value={row?.amount??0}>{amountFormat.format(row?.amount??0)}</WorkspaceNumber></td>}
+          <td>{stage.probability}%</td>{showAmount&&<td>{stage.outcome==='open'?<WorkspaceNumber kind="money" value={row?.weightedOpen??0}>{amountFormat.format(row?.weightedOpen??0)}</WorkspaceNumber>:'—'}</td>}</tr>;
       })}</tbody>
-      <tfoot><tr><th scope="row" colSpan={2}>Total</th><td>{total?.dealCount??0}</td><td>{amountFormat.format(total?.amount??0)}</td>
-        <td>—</td><td>{amountFormat.format(total?.weightedOpen??0)}</td></tr></tfoot>
+      <tfoot><tr><th scope="row" colSpan={2}>Total</th><td>{total?.dealCount??0}</td>{showAmount&&<td><WorkspaceNumber kind="money" value={total?.amount??0}>{amountFormat.format(total?.amount??0)}</WorkspaceNumber></td>}
+        <td>—</td>{showAmount&&<td><WorkspaceNumber kind="money" value={total?.weightedOpen??0}>{amountFormat.format(total?.weightedOpen??0)}</WorkspaceNumber></td>}</tr></tfoot>
     </table></div>
   </section>;
 }

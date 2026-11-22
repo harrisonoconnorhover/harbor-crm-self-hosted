@@ -1,177 +1,98 @@
+.portable-contacts:has(> .portable-side-nav) {
+  --nav-ink:#20383d; --nav-surface:#273336; --nav-divider:#415154;
+  --nav-width:13.25rem; --nav-bar:3.5rem; --portable-topbar-height:var(--nav-bar);
+  padding-inline-start:var(--nav-width);
+}
+.portable-contacts :target { scroll-margin-block-start:calc(var(--nav-bar, 0px) + 8px); }
 .portable-contacts > .portable-crm-header {
-  --portable-chrome: #273538;
-  --portable-chrome-border: #435356;
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px 16px;
-  padding: 10px clamp(12px, 2vw, 24px);
-  align-items: center;
-  background: var(--portable-chrome);
-  color: #f6faf9;
-  font-size: .875rem;
+  position:sticky; top:0; z-index:21; box-sizing:border-box; height:var(--nav-bar);
+  margin-inline-start:calc(-1 * var(--nav-width)); padding:0 18px 0 0;
+  display:grid; grid-template-columns:var(--nav-width) minmax(8rem,32rem) 1fr; align-items:center;
+  gap:0 16px; flex-wrap:nowrap; background:var(--nav-surface); color:#f6faf9; border-bottom:1px solid var(--nav-divider);
+}
+.portable-brand-area,.portable-crm-brand,.portable-crm-account { display:flex; align-items:center; }
+.portable-brand-area { padding-left:18px; }
+.portable-crm-brand { gap:9px; font-size:1.22rem; font-weight:700; letter-spacing:-.04em; }
+.portable-crm-brand svg { color:#9fddcc; width:24px; height:24px; }
+.portable-contacts .portable-menu-toggle { display:none; }
+.portable-contacts .portable-crm-account { justify-self:end; gap:10px; font-size:.8125rem; }
+.portable-crm-account > a { display:flex; gap:7px; align-items:center; padding:7px; border-radius:6px; }
+.portable-contacts .portable-crm-account > a,.portable-contacts .portable-account-menu a { text-decoration:none; }
+.portable-crm-account > a:hover,.portable-crm-account > a[aria-current] { background:#ffffff1e; }
+.portable-crm-account > a > svg { width:18px; height:18px; }
+.portable-account-menu { position:relative; }
+.portable-account-menu summary { cursor:pointer; list-style:none; border-radius:50%; width:29px; height:29px;
+  display:grid; place-items:center; background:#d6e8e3; color:#22484a; font-weight:700; }
+.portable-account-menu summary::-webkit-details-marker { display:none; }
+.portable-account-menu > div { position:absolute; top:calc(100% + 10px); right:0; background:white; color:var(--nav-ink);
+  display:grid; gap:10px; width:max-content; max-width:85vw; overflow-wrap:anywhere; padding:14px; }
+.portable-crm-header .portable-global-search { margin:0; min-width:0; position:relative; height:36px; color:var(--nav-ink); }
+.portable-crm-header .portable-global-search details { width:100%; }
+.portable-crm-header .portable-global-search summary {
+  min-inline-size:0; width:100%; height:36px; box-sizing:border-box; border:1px solid #607274;
+  color:#ecf4f2; background:#354548; font-weight:500;
+}
+.portable-crm-header .portable-global-search details[open] {
+  position:absolute; top:0; left:0; z-index:4; width:min(42rem,calc(100vw - var(--nav-width) - 40px));
+  max-height:80dvh; overflow:auto; box-shadow:0 7px 24px #14252926;
+}
+.portable-contacts > .portable-side-nav {
+  position:fixed; z-index:20; inset:var(--nav-bar) auto 0 0; box-sizing:border-box; width:var(--nav-width);
+  display:block; overflow-y:auto; margin:0; padding:12px 9px; background:var(--nav-surface); color:#edf4f2;
+}
+.portable-nav-section:first-child { padding-bottom:9px; margin-bottom:9px; border-bottom:1px solid var(--nav-divider); }
+.portable-contacts .portable-nav-category {
+  display:flex; align-items:center; gap:11px; width:100%; min-height:40px; padding:8px 10px;
+  margin:1px 0; border:0; border-radius:6px; background:transparent; color:inherit; font-size:.875rem;
+  font-weight:500; text-align:left; cursor:pointer;
+}
+.portable-nav-category > span { white-space:nowrap; }
+.portable-nav-category svg { flex:none; width:17px; height:17px; stroke-width:1.7; color:#c0d1d0; }
+.portable-nav-category svg:last-child { margin-left:auto; width:13px; height:13px; }
+.portable-contacts .portable-nav-category:is(:hover,[aria-expanded=true]) { background:#405053; }
+.portable-contacts .portable-nav-category[data-current] { color:white; background:#3b5153; box-shadow:inset 3px 0 #92cdbf; }
+.portable-side-nav :focus-visible,.portable-crm-header :focus-visible { outline:2px solid #459baf; outline-offset:1px; }
+.portable-account-menu > div,.portable-nav-panel { border:1px solid #d2dfdc; border-radius:10px; box-shadow:0 8px 26px #132b2c24; }
+.portable-nav-panel { position:fixed; top:calc(var(--nav-bar) + 8px); left:calc(var(--nav-width) + 6px);
+  width:15.5rem; box-sizing:border-box; max-height:calc(100dvh - var(--nav-bar) - 16px); overflow:auto;
+  padding:12px 8px; background:white; color:var(--nav-ink); }
+.portable-nav-panel[hidden] { display:none; }
+.portable-nav-title { margin:2px 8px 8px; font-size:1rem; font-weight:700; }
+.portable-nav-panel ul { list-style:none; padding:0; margin:0; }
+.portable-nav-panel li { display:flex; align-items:center; border-radius:5px; }
+.portable-nav-panel li:focus-within,.portable-nav-panel li:hover { background:#edf4f2; }
+.portable-nav-panel li:has([aria-current=page]) { background:#e1eeea; }
+.portable-contacts .portable-nav-panel li a,.portable-nav-panel li > span {
+  flex:1; min-width:0; padding:9px 8px; border-radius:4px; text-decoration:none; font-size:.87rem;
+}
+.portable-nav-panel li a[aria-current] { font-weight:650; color:#005d60; }
+.portable-contacts .portable-pin { display:grid; place-items:center; background:transparent; color:#617775;
+  padding:6px; border:0; cursor:pointer; margin-right:3px; }
+.portable-pin[aria-pressed=true] { color:#006d69; }
+.portable-pin:disabled { opacity:.4; cursor:default; }
+.portable-unavailable-pins summary { margin:8px; cursor:pointer; font-size:.85rem; }
+.portable-nav-panel p { margin:8px; font-size:.85rem; line-height:1.5; }
+@media (max-width:55rem) {
+  .portable-contacts:has(> .portable-side-nav) { padding-left:0; }
+  .portable-contacts > .portable-crm-header { margin-left:0; grid-template-columns:auto minmax(0,1fr) auto; gap:8px; padding:0 10px; }
+  .portable-brand-area { padding:0; gap:7px; }
+  .portable-crm-brand { font-size:1rem; gap:5px; }
+  .portable-crm-brand svg { width:19px; }
+  .portable-contacts .portable-menu-toggle { display:grid; place-items:center; border:0; background:transparent; color:white; padding:6px; }
+  .portable-menu-toggle svg { width:21px; height:21px; }
+  .portable-crm-header .portable-global-search details[open] { position:fixed; left:8px; top:8px; width:calc(100vw - 16px); }
+  .portable-contacts > .portable-side-nav { display:none; width:min(21rem,100vw); box-shadow:4px 8px 20px #14252932; }
+  .portable-contacts > .portable-side-nav[data-mobile-open] { display:block; }
+  .portable-nav-panel { position:static; width:auto; max-height:none; margin:3px 3px 8px; box-shadow:none; }
+  .portable-nav-title { display:none; }
+  .portable-nav-category[aria-expanded=true] svg:last-child { transform:rotate(90deg); }
+  .portable-crm-account > a > span { display:none; }
+  .portable-contacts .portable-crm-account { gap:3px; }
+}
+@media (max-width:30rem) {
+  .portable-crm-brand { font-size:0; gap:0; }
+  .portable-crm-header .portable-global-search summary { font-size:.8rem; padding-inline:8px; }
+  .portable-crm-account > a { padding:5px; }
 }
 
-.portable-crm-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 1.125rem;
-  font-weight: 700;
-  letter-spacing: -.025em;
-  white-space: nowrap;
-}
-
-.portable-crm-brand svg { width: 21px; height: 21px; color: #9ed7c8; }
-
-.portable-contacts > .portable-crm-header > nav {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0;
-}
-
-.portable-contacts .portable-crm-header > nav > a, .portable-crm-more summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  border-radius: 6px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.portable-crm-header nav svg { width: 16px; height: 16px; flex: none; }
-
-.portable-crm-header > nav > a:hover, .portable-crm-more summary:hover,
-.portable-crm-more[open] summary { background: #ffffff1f; }
-
-.portable-contacts .portable-crm-header > nav > a[aria-current="page"],
-.portable-crm-more summary[data-current],
-.portable-crm-more[open] summary[data-current],
-.portable-crm-more-panel a[aria-current="page"] {
-  background: #d9ece7;
-  color: #153b3b;
-  font-weight: 650;
-}
-
-.portable-crm-header :is(a, summary):focus-visible { outline: 2px solid #92cbbb; outline-offset: 2px; }
-.portable-crm-more summary { cursor: pointer; list-style: none; }
-.portable-crm-more summary::-webkit-details-marker { display: none; }
-.portable-crm-more summary::after {
-  width: 6px;
-  height: 6px;
-  margin-inline-start: 2px;
-  border-right: 1px solid;
-  border-bottom: 1px solid;
-  content: "";
-  transform: translateY(-2px) rotate(45deg);
-}
-
-.portable-crm-more-panel {
-  position: absolute;
-  z-index: 30;
-  inset-block-start: calc(100% + 4px);
-  inset-inline: 12px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-  max-block-size: min(23rem, 60vh);
-  overflow-y: auto;
-  padding: 12px;
-  background: white;
-  color: #263a3d;
-  border: 1px solid #dce6e4;
-  border-radius: 10px;
-  box-shadow: 0 8px 24px #12342f30;
-}
-
-.portable-crm-more:not([open]) .portable-crm-more-panel { display: none; }
-.portable-crm-more-panel p { margin: 4px 7px 6px; color: #465d60; font-size: .75rem; font-weight: 650; }
-.portable-contacts .portable-crm-header .portable-crm-more-panel a { display: block; padding: 6px 7px; border-radius: 4px; text-decoration: none; }
-.portable-crm-more-panel a:hover { background: #edf5f3; }
-
-.portable-crm-account {
-  display: flex;
-  min-inline-size: 0;
-  grid-column: 2;
-  grid-row: 1;
-  max-inline-size: 100%;
-  align-items: center;
-  justify-self: end;
-  gap: 10px;
-  font-size: .8125rem;
-}
-
-.portable-crm-account-email { min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.portable-crm-account-mark {
-  display: grid;
-  flex: none;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: 50%;
-  background: #d9ece7;
-  color: #153b3b;
-  font-weight: 700;
-}
-.portable-contacts .portable-crm-account a {
-  flex: none;
-  padding: 5px 8px;
-  border: 1px solid var(--portable-chrome-border);
-  border-radius: 6px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.portable-crm-account a:hover { background: #ffffff1f; }
-
-@media (min-width: 64rem) and (min-height: 32rem) {
-  .portable-contacts:has(> .portable-crm-header) {
-    --portable-rail-width: 11.5rem;
-    --portable-topbar-height: 3.5rem;
-    padding-inline-start: var(--portable-rail-width);
-  }
-
-  .portable-contacts > .portable-crm-header {
-    position: sticky;
-    z-index: 15;
-    inset-block-start: 0;
-    margin-inline-start: calc(-1 * var(--portable-rail-width));
-    height: var(--portable-topbar-height);
-    border-block-end: 1px solid var(--portable-chrome-border);
-  }
-
-  .portable-contacts > .portable-crm-header > nav {
-    position: fixed;
-    inset-block: var(--portable-topbar-height) 0;
-    inset-inline-start: 0;
-    display: flex;
-    flex-flow: column nowrap;
-    align-items: stretch;
-    justify-content: flex-start;
-    gap: 3px;
-    width: var(--portable-rail-width);
-    padding: 14px 10px;
-    border-inline-end: 1px solid var(--portable-chrome-border);
-    background: var(--portable-chrome);
-  }
-
-  .portable-contacts .portable-crm-header > nav > a, .portable-crm-more summary { padding: 9px 12px; gap: 10px; }
-  .portable-crm-more { position: relative; }
-  .portable-crm-more summary::after { margin-inline-start: auto; transform: rotate(-45deg); }
-  .portable-crm-more-panel {
-    inset-block-start: auto;
-    inset-block-end: 0;
-    inset-inline-start: calc(100% + 18px);
-    inset-inline-end: auto;
-    inline-size: 30rem;
-  }
-  .portable-crm-more-panel[data-shared] { inline-size: 12rem; }
-  .portable-crm-account { max-inline-size: 23rem; }
-}
-
-@media (max-width: 34rem) {
-  .portable-crm-header nav > a > svg, .portable-crm-more summary > svg, .portable-crm-account-mark { display: none; }
-}
+.workspace-switcher-name { max-width:13rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

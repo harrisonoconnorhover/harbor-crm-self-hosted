@@ -1,0 +1,1 @@
+CREATE INDEX "companies_active_domain" ON "companies" USING btree ("workspace_id",lower("data"->>'domain')) WHERE "companies"."archived_at" IS NULL;

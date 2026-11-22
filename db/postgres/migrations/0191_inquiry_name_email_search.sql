@@ -1,0 +1,1 @@
+CREATE INDEX "portable_lead_inquiries_search" ON "portable_lead_inquiries" USING gin (("payload"->>'name') public.gin_trgm_ops,("payload"->>'email') public.gin_trgm_ops) WHERE "portable_lead_inquiries"."status" <> 'removed';

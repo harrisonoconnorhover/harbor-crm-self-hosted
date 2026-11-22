@@ -1,5 +1,8 @@
+import {readCommerceCsv,readCommerceResult} from '../db/postgres/record-access-store';
+import {z} from 'zod';
+import {stripeInvoiceConfig,checkStripeInvoice} from './portable-stripe-invoice';
 import {previewPortableInvoiceSource} from '../db/postgres/portable-invoice-source-store';
-import {listPortableInvoices,listPortableInvoicesForExport,readPortableInvoice,writePortableInvoice} from '../db/postgres/portable-invoice-store';
+import {merchantInvoice,listPortableInvoices,listPortableInvoicesForExport,readPortableInvoice,writePortableInvoice} from '../db/postgres/portable-invoice-store';
 import {ApiError} from '../lib/api-error';
 import {invoiceHTML,invoiceLabel,invoiceStatusLabels} from '../lib/invoices';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
@@ -43,10 +46,24 @@ async function invoices(request:Request){
       return json({ok:true,id:input.data.id,...(typeof result==='object'?result:{})});
     }
     if(params.size!==new Set(params.keys()).size)return json({error:'Invalid invoice query.'},400);
+    if(params.get('view')==='stripe'){
+      const id=params.get('id');
+      if(params.size!==2||!id||!z.string().guid().safeParse(id).success)return json({error:'Choose one invoice.'},400);
+      const config=stripeInvoiceConfig();
+      if(!config||user.guest)return json({error:'Invoice unavailable.'},404);
+      const row=await merchantInvoice(db,user.userId,config.workspaceId,id);
+      if(!row)return json({error:'Invoice unavailable.'},404);
+      if(!row.finalizedAt||row.voidReason!==null)return json({error:'Choose an issued invoice that is still open.'},409);
+      const invoice=await checkStripeInvoice(config,row);
+      const latest=await merchantInvoice(db,user.userId,config.workspaceId,id);
+      if(!latest)return json({error:'Invoice unavailable.'},404);
+      if(latest.revision!==row.revision)return json({error:'The Harbor invoice changed. Reload it and check Stripe again.'},409);
+      return json({invoice});
+    }
     if(params.has('export')){
       const query=portableInvoiceExport.safeParse(Object.fromEntries(params));
       if(!query.success)return json({error:'Choose invoice list filters to export.'},400);
-      const rows=await listPortableInvoicesForExport(db,user.userId,query.data);
+      const rows=await readCommerceCsv(db,user,'invoices',request.method,tx=>listPortableInvoicesForExport(tx,user.userId,query.data));
       if(rows===null)return json({error:`More than ${portableInvoiceExportLimit} invoices match. Narrow your filters to export the full list.`},413);
       return new Response(request.method==='HEAD'?null:invoicesCsv(rows),{headers:{
         'cache-control':'private, no-store','x-content-type-options':'nosniff',
@@ -57,9 +74,10 @@ async function invoices(request:Request){
     if(!query.success)return json({error:'Invalid invoice query.'},400);
     if('source' in query.data)return json(await previewPortableInvoiceSource(db,user,query.data));
     if('id' in query.data){
-      const result=await readPortableInvoice(db,user.userId,query.data.id,query.data.before,query.data.paymentsBefore);
-      if(!result)return json({error:'Invoice not found.'},404);
-      if(query.data.download){
+      const {id,before,paymentsBefore,download}=query.data;
+      if(download)return await readCommerceResult(db,user,'invoices',request.method!=='HEAD'&&'document',async tx=>{
+        const result=await readPortableInvoice(tx,user,false,id,before,paymentsBefore);
+        if(!result)return json({error:'Invoice not found.'},404);
         const {invoice}=result;
         if(!invoice.snapshot||invoice.number===null)return json({error:'Finalize the invoice before downloading.'},400);
         return new Response(invoiceHTML(invoice),{headers:{
@@ -68,10 +86,11 @@ async function invoices(request:Request){
           'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; img-src data:",
           'cache-control':'private, no-store','x-content-type-options':'nosniff',
         }});
-      }
-      return json(result);
+      },response=>response.ok?[id]:[]);
+      const result=await readPortableInvoice(db,user,request.method!=='HEAD',id,before,paymentsBefore);
+      return result?json(result):json({error:'Invoice not found.'},404);
     }
-    return json(await listPortableInvoices(db,user.userId,query.data));
+    return json(await listPortableInvoices(db,user,request.method!=='HEAD',query.data));
   }catch(error){
     if(error instanceof ApiError)return json({error:error.message},error.status);
     return json({error:'Could not load or save invoices.'},500);

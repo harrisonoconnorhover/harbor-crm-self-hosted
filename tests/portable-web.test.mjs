@@ -1,4 +1,8 @@
-import {verifyPortableContactArchive} from './portable-contact-archive-fixture.mjs';
+import {verifyWebAttribution} from './portable-web-attribution-fixture.mjs';
+import {verifyTeamInbox} from './portable-team-inbox-fixture.mjs';
+import {verifyCustomObjects} from './portable-custom-objects-fixture.mjs';
+import {verifyLandingPages} from './portable-landing-fixture.mjs';
+import {verifyPortableContactArchive,verifyArchiveListHistory} from './portable-contact-archive-fixture.mjs';
 import {verifyPortableCompanyArchive} from './portable-company-archive-fixture.mjs';
 import {verifyPortableDealArchive} from './portable-deal-archive-fixture.mjs';
 import {verifyPortableSharedArchive} from './portable-shared-archive-fixture.mjs';
@@ -24,6 +28,10 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {exportJWK,generateKeyPair,SignJWT} from 'jose';
 import postgres from 'postgres';
 import {verifyPortableCalendar,verifyPortableInvites,verifyPortableCancellations,verifyPortableReschedules,verifyPortableCalendarMonitor,portableCalendarFixture} from './portable-calendar-fixture.mjs';
+import {verifyAccessHistory} from './portable-access-history-fixture.mjs';
+import {verifyFirstResponse} from './portable-first-response-fixture.mjs';
+import {verifyHelpCenter} from './portable-help-center-fixture.mjs';
+import {verifyTeamBookings} from './portable-team-booking-fixture.mjs';
 import {verifyGuestBooking,verifyGuestStatusRead} from './guest-booking-fixture.mjs';
 import {verifyPublishedAvailability} from './published-availability-fixture.mjs';
 import {verifyPortableBookingPagination} from './portable-booking-pagination-fixture.mjs';
@@ -67,7 +75,10 @@ import {verifyPortableRecordOwners} from './portable-record-owner-fixture.mjs';
 import {verifyPortableJobs,verifyPortableSharedNotes} from './portable-jobs-fixture.mjs';
 import {localFileFixture,verifyPortableFiles} from './portable-files-fixture.mjs';
 import {verifyPortableTaskReminders} from './portable-task-reminders-fixture.mjs';
-import {verifyPortableBackupTeamAdministration} from './portable-team-administration-fixture.mjs';
+import {verifyLeadRouting} from './portable-lead-routing-fixture.mjs';
+import {verifyRecordPropertyAccess} from './portable-record-property-access-fixture.mjs';
+import {verifyPortableRecordScopes} from './portable-record-scope-fixture.mjs';
+import {verifyPortableBackupTeamAdministration,verifyPortableSeatCapacity} from './portable-team-administration-fixture.mjs';
 import {verifyPortableSharing} from './portable-sharing-fixture.mjs';
 import {checkStandalone} from '../scripts/check-standalone.mjs';
 import {verifyPortableMemberSavedViews,verifyPortableSavedViews} from './portable-saved-views-fixture.mjs';
@@ -86,6 +97,7 @@ import {verifyPortableTicketSla} from './portable-ticket-sla-fixture.mjs';
 import {verifyPortableCustomProperties} from './portable-custom-properties-fixture.mjs';
 import {verifyPortablePropertyGroups} from './portable-property-groups-fixture.mjs';
 import {verifyPortableExternalApi} from './portable-external-api-fixture.mjs';
+import {verifySearchScale} from './portable-search-scale-fixture.mjs';
 import {verifyPortableCrmSearch} from './portable-crm-search-fixture.mjs';
 
 const database=process.env.HARBOR_TEST_POSTGRES_URL;
@@ -113,7 +125,7 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
     assert.match(address.pathname,/^\/harbor_identity_test(?:_[a-z0-9]+)?$/);
     const sql=postgres(database,{onnotice:()=>{}});
     const directory=await mkdtemp(join(tmpdir(),'harbor-web-fixture-'));
-    let child,exited,logs,fixture;
+    let child,exited,logs,fixture,pool;
     async function stop(){
       if(!child)return;
       child.kill();
@@ -132,6 +144,12 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       const env={...process.env,...fixture?.env,PORT:String(port),DATABASE_URL:database,HARBOR_LOGIN_ORIGIN:origin,
         HARBOR_LOGIN_ALLOWED_EMAILS:'owner@example.test,other@example.test,invitee@example.test',HARBOR_LOGIN_GOOGLE_CLIENT_ID:'fixture-client',
         HARBOR_LOGIN_GOOGLE_CLIENT_SECRET:'fixture-secret',HARBOR_PORTABLE_GMAIL_ENABLED:'false',HARBOR_PORTABLE_WORKFLOW_GMAIL_ENABLED:'false',HARBOR_GOOGLE_FIXTURE:join(directory,'google.json')};
+      const listSearchEmails=process.env.HARBOR_TEST_RECORD_LIST_SEARCH==='true'
+        ?Array.from({length:97},(_,i)=>'record-list-rep-'+i+'@example.test'):[];
+      if(listSearchEmails.length){
+        env.HARBOR_LOGIN_ALLOWED_EMAILS += ','+listSearchEmails.join(',');
+        env.HARBOR_WORKSPACE_SEAT_LIMIT='100';
+      }
       const guestProofLog=join(directory,'guest-proof.jsonl');
       await writeFile(guestProofLog,'');
       env.HARBOR_TEST_GUEST_PROOF_LOG=guestProofLog;
@@ -147,6 +165,8 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
         import {createHash} from 'node:crypto';
         import {readFile,appendFile} from 'node:fs/promises';
         import {readGuestMail} from ${JSON.stringify(new URL('./guest-booking-fixture.mjs',import.meta.url).href)};
+        import {stripeInvoiceFetch} from ${JSON.stringify(new URL('./portable-stripe-invoice-fixture.mjs',import.meta.url).href)};
+        import {postmarkFetch} from ${JSON.stringify(new URL('./portable-team-inbox-fixture.mjs',import.meta.url).href)};
         import {calendarFetch} from ${JSON.stringify(calendar.path)};
         import {inboxFetch} from ${JSON.stringify(new URL('./portable-gmail-inbox-fixture.mjs',import.meta.url).href)};
         import {personalGoogleFetch} from ${JSON.stringify(new URL('./portable-google-fixture.mjs',import.meta.url).href)};
@@ -155,6 +175,8 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
         const original=globalThis.fetch;
         globalThis.fetch=async (resource,options)=>{
           const url=new URL(resource);
+          if(url.hostname==='api.stripe.com')return stripeInvoiceFetch(url,options);
+          if(url.hostname==='api.postmarkapp.com')return postmarkFetch(url,options);
           if(url.origin===process.env.HARBOR_LOGIN_ORIGIN)return original(resource,options);
           if(url.href==='https://oauth2.googleapis.com/token'&&options?.body?.get('refresh_token')==='guest-proof-refresh'){
             return Response.json({access_token:'guest-proof-access',expires_in:3600,token_type:'Bearer'});
@@ -191,6 +213,12 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       const fingerprint=(await readFile(new URL('../.harbor/portable-build/release.sha256',import.meta.url),'utf8')).trim();
       assert.match(fingerprint,/^[a-f0-9]{64}$/);
       await verifyPortableMigrations(env,sql,directory);
+      if(process.env.HARBOR_TEST_POOL==='true'){
+        const {startTestPool}=await import('./portable-pool-fixture.mjs');
+        pool=await startTestPool({sql,database,directory});
+        Object.assign(env,{DATABASE_URL:pool.url,PGSSL:'verify-full',HARBOR_WORKSPACE_SEAT_LIMIT:'100',
+          HARBOR_LOGIN_ALLOWED_EMAILS:['owner@example.test','other@example.test',...pool.emails].join(',')});
+      }
       async function start(expectedStatus=200){
         child=spawn(process.execPath,['--import',mock,command,'start'],{env,cwd,stdio:['ignore','pipe','pipe']});
         exited=once(child,'exit');
@@ -319,6 +347,211 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       assert.ok(retryHtml.includes('href="/auth/google/start?return_to='+encodeURIComponent(retryDestination)+'"'));
       const headers=await signIn('owner@example.test');
       const other=await signIn('other@example.test');
+      if(pool){
+        const {exercisePooledWorkspace}=await import('./portable-pool-fixture.mjs');
+        await exercisePooledWorkspace({pool,sql,request,origin,headers,other,fixture,env});
+        return;
+      }
+      if(process.env.HARBOR_TEST_QUOTE_SIGNING==='true'){
+        const {verifyQuoteSigning}=await import('./portable-quote-signing-fixture.mjs');
+        await verifyQuoteSigning({request,origin,headers,other,sql,env,fixture,directory});
+        return;
+      }
+      if(process.env.HARBOR_TEST_CONTACT_ARCHIVE==='true'){
+        await verifyPortableContactArchive({request,origin,headers,other,sql,browser:true});
+        await verifyArchiveListHistory({request,origin,headers,other,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_FILE_ACCESS==='true'){
+        const {verifyFileAccess}=await import('./portable-file-access-fixture.mjs');
+        await verifyFileAccess({request,headers,other,origin,sql,fixture});
+        return;
+      }
+      if(process.env.HARBOR_TEST_FILE_SEARCH==='true'){
+        const {verifyFileSearch}=await import('./portable-file-search-fixture.mjs');
+        await verifyFileSearch({request,headers,other,origin,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_INQUIRY_SEARCH==='true'){
+        const {verifyInquirySearch}=await import('./portable-inquiry-search-fixture.mjs');
+        await verifyInquirySearch({request,headers,other,origin,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_RECORD_LIST_SEARCH==='true'){
+        const {verifyRecordListSearch}=await import('./portable-record-list-search-fixture.mjs');
+        await verifyRecordListSearch({request,headers,other,origin,sql,signIn,listSearchEmails});
+        return;
+      }
+      if(process.env.HARBOR_TEST_COMMERCE_SEARCH==='true'){
+        const {verifyCommerceSearch}=await import('./portable-commerce-search-fixture.mjs');
+        await verifyCommerceSearch({request,origin,headers,other,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_SEARCH_ONLY==='true'){
+        await verifySearchScale({request,origin,headers,other,sql});
+        return;
+      }
+      const mapDomain=async workspace=>{
+          const domain=origin.replace('127.0.0.1','localhost');
+          await stop();env.HARBOR_LANDING_DOMAINS=JSON.stringify({[domain]:workspace});await start();return domain;
+        };
+      const configure=async settings=>{await stop();Object.assign(env,settings);await start();};
+      if(process.env.HARBOR_TEST_STRIPE_INVOICES==='true'){
+        const {verifyStripeInvoices}=await import('./portable-stripe-invoice-fixture.mjs');
+        await verifyStripeInvoices({request,origin,headers,other,directory,configure,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_WEBHOOKS==='true'){
+        const {verifyPortableWebhooks}=await import('./portable-webhook-fixture.mjs');
+        await verifyPortableWebhooks({request,origin,headers,other,sql,env,configure});
+        return;
+      }
+      if(process.env.HARBOR_TEST_CUSTOM_RECORD_WORKFLOWS==='true'){
+        const {verifyCustomRecordWorkflows}=await import('./portable-custom-record-workflow-fixture.mjs');
+        await verifyCustomRecordWorkflows({request,origin,headers,other,sql,configure,signIn});
+        return;
+      }
+      if(process.env.HARBOR_TEST_COMPANY_WORKFLOWS==='true'){
+        const {verifyCompanyWorkflows}=await import('./portable-company-workflow-fixture.mjs');
+        await verifyCompanyWorkflows({request,origin,headers,other,sql,configure});
+        return;
+      }
+      if(process.env.HARBOR_TEST_TICKET_WORKFLOWS==='true'){
+        const {verifyTicketWorkflows}=await import('./portable-ticket-workflow-fixture.mjs');
+        await verifyTicketWorkflows({request,origin,headers,other,sql,env,configure});
+        return;
+      }
+      if(process.env.HARBOR_TEST_WORKFLOW_WEBHOOKS==='true'){
+        const {verifyWorkflowWebhooks}=await import('./portable-workflow-webhook-fixture.mjs');
+        await verifyWorkflowWebhooks({request,origin,headers,other,sql,env,configure});
+        return;
+      }
+      if(process.env.HARBOR_TEST_SALES_SEQUENCES==='true'){
+        await stop();
+        Object.assign(env,outlookFixture(directory),{HARBOR_PORTABLE_MODE:'local',HARBOR_PORTABLE_GMAIL_ENABLED:'true',HARBOR_PORTABLE_GMAIL_OWNER:'owner@example.test'});
+        await start();
+        const {verifyPortableSalesSequences}=await import('./portable-sales-sequence-fixture.mjs');
+        await verifyPortableSalesSequences({request,origin,headers,other,sql,env,directory});
+        return;
+      }
+      if(process.env.HARBOR_TEST_RECORD_REPORTING==='true'){
+        const {verifyRecordReporting}=await import('./portable-record-reporting-fixture.mjs');
+        const {verifyRelatedCompanyReports}=await import('./portable-related-company-report-fixture.mjs');
+        await verifyRelatedCompanyReports({request,origin,headers,other,sql});
+        await verifyRecordReporting({request,origin,headers,other,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_BRANCH_STEPS==='true'){
+        const {verifyBranchSteps}=await import('./portable-branch-steps-fixture.mjs');
+        await verifyBranchSteps({request,origin,headers,other,sql,env,configure});
+        return;
+      }
+      if(process.env.HARBOR_TEST_CONDITIONAL_PATHS==='true'){
+        const {verifyConditionalPaths}=await import('./portable-conditional-paths-fixture.mjs');
+        await verifyConditionalPaths({request,origin,headers,other,sql,env,restart:async()=>{await stop();await start();}});
+        return;
+      }
+      if(process.env.HARBOR_TEST_AIRCALL==='true'){
+        const {verifyAircall}=await import('./portable-aircall-fixture.mjs');
+        await verifyAircall({request,origin,headers,other,configure,env,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_LISTS==='true'){
+        await verifyPortableSegments({request,origin,headers,other,sql});
+        await verifyPortableStaticSegments({request,origin,headers,other,sql});
+        await verifyPortableSegmentWorkflow({request,origin,headers,other,sql,env});
+        const {verifySharedLists}=await import('./portable-shared-lists-fixture.mjs');
+        await verifySharedLists({request,origin,headers,other,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_SETTINGS==='true'){
+        const {verifySettingsDestinations}=await import('./portable-settings-fixture.mjs');
+        await verifySettingsDestinations({request,origin,headers,other,sql,signIn});
+        return;
+      }
+      if(process.env.HARBOR_TEST_NAVIGATION==='true'){
+        const {verifyNavigation}=await import('./portable-navigation-fixture.mjs');
+        await verifyNavigation({request,origin,headers,other,sql,signIn,configure});
+        return;
+      }
+      if(process.env.HARBOR_TEST_DEAL_TASKS==='true'){
+        const {verifyDealTaskHandoff}=await import('./portable-deal-task-fixture.mjs');
+        await verifyDealTaskHandoff({request,origin,headers,other,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_EXTERNAL_WRITES==='true'){
+        const {verifyExternalWrites}=await import('./portable-external-write-fixture.mjs');
+        await verifyExternalWrites({request,origin,headers,other,sql});
+        return;
+      }
+      if(process.env.HARBOR_TEST_ATTRIBUTION==='true'){
+        await verifyWebAttribution({request,origin,headers,other,sql});
+        if(process.env.HARBOR_TEST_PLAYWRIGHT){
+          const {verifyAttributionBrowser}=await import('./portable-web-attribution-browser.mjs');
+          await verifyAttributionBrowser({request,origin,headers,mapDomain,sql});
+        }
+        return;
+      }
+      if(process.env.HARBOR_TEST_TEAM_INBOX==='true'){
+        await verifyTeamInbox({request,origin,headers,other,signIn,sql,directory,configure:async settings=>{
+          await stop();
+          Object.assign(env,settings);
+          await start();
+        }});
+        return;
+      }
+      if(process.env.HARBOR_TEST_CUSTOM_OBJECTS==='true'){
+        await verifyCustomObjects({request,origin,headers,other,sql});return;
+      }
+      if(process.env.HARBOR_TEST_LANDING==='true'){
+        await verifyLandingPages({request,origin,headers,other,mapDomain,sql});return;
+      }
+      if(process.env.HARBOR_TEST_ACCESS_HISTORY==='true'){
+        await verifyAccessHistory({request,origin,headers,other,sql});return;
+      }
+      if(process.env.HARBOR_TEST_FIRST_RESPONSE==='true'){
+        const {workspaceId}=await verifyFirstResponse({request,origin,headers,other,sql});
+        await verifyPortableTicketSla({request,origin,headers,other,sql,workspaceId});
+        const {verifyRecentTicketQueue}=await import('./portable-recent-tickets-fixture.mjs');
+        await verifyRecentTicketQueue({request,origin,headers,other,sql,workspaceId});
+        const {verifyDeadlineQueueAtScale}=await import('./portable-first-response-queue-fixture.mjs');
+        await verifyDeadlineQueueAtScale({request,origin,headers,sql,workspaceId});return;
+      }
+      if(process.env.HARBOR_TEST_HELP_CENTER==='true'){
+        await verifyHelpCenter({request,origin,headers,other,sql});return;
+      }
+      if(process.env.HARBOR_TEST_TEAM_BOOKING==='true'){
+        await stop();
+        Object.assign(env,calendar.env,{HARBOR_PUBLIC_AVAILABILITY_ENABLED:'true',HARBOR_GUEST_BOOKING_PROOF_ENABLED:'true',
+          HARBOR_PORTABLE_GMAIL_ENABLED:'true',HARBOR_PORTABLE_GMAIL_OWNER:'owner@example.test',
+          HARBOR_PORTABLE_GMAIL_CLIENT_ID:'guest-proof-client',HARBOR_PORTABLE_GMAIL_CLIENT_SECRET:'guest-proof-secret',
+          HARBOR_PORTABLE_GMAIL_REFRESH_TOKEN:'guest-proof-refresh'});
+        await start();
+        await verifyTeamBookings({request,origin,headers,other,sql,calendar,readMail:async()=>
+          (await readFile(guestProofLog,'utf8')).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line))});
+        return;
+      }
+      if(process.env.HARBOR_TEST_TEAMS_ONLY==='true'){
+        for(const account of [headers,other]){
+          const id=crypto.randomUUID();
+          for(const body of [{action:'team_create',id,name:'First department',parentId:null},{action:'team_remove',id,revision:1}]){
+            const response=await request('/api/workspaces',{method:'POST',headers:{...account,origin,'content-type':'application/json'},body:JSON.stringify(body)});
+            assert.equal(response.status,200,await response.clone().text());
+          }
+        }
+        await verifyPortableBackupTeamAdministration({request,origin,headers,other,signIn,sql});
+        await verifyPortableRecordScopes({request,origin,headers,other,signIn,sql,fixture,env,command,cwd});
+        for(const kind of ['contacts','companies','deals'])await verifyRecordPropertyAccess({request,origin,headers,other,sql},kind);
+        await verifyLeadRouting({request,origin,headers,other,sql,env,configureWeb:configure});
+        await verifyPortableSeatCapacity({request,origin,headers,other,sql,restart:async limit=>{
+          await stop();
+          env.HARBOR_WORKSPACE_SEAT_LIMIT=limit;
+          await start();
+        }});
+        t.diagnostic('Verified 150 reserved seats, last-page record assignment and preservation of memberships and invitations after lowering the limit.');
+        t.diagnostic('Verified directory hierarchy, assignment, concurrent moves, workspace isolation and revoke/rejoin.');
+        return;
+      }
       if(process.env.HARBOR_TEST_RAILWAY_ROLLBACK_COMMAND){
         await verifyPortableRailwayRollback({env,directory,mock,signIn,command:process.env.HARBOR_TEST_RAILWAY_ROLLBACK_COMMAND});
         t.diagnostic('Earlier Railway app reopened the pre-upgrade Contact and private attachment after restore.');
@@ -326,7 +559,7 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       }
       if(process.env.HARBOR_TEST_RECOVERY_ONLY==='true'){
         assert.ok(fixture,'The focused recovery rehearsal requires disposable private storage.');
-        const timing=await verifyPortableRecoveryJourney({env,mock,request,headers,sql,directory,signIn,fixture});
+        const timing=await verifyPortableRecoveryJourney({env,mock,request,headers,sql,directory,signIn,fixture,restart:async()=>{await stop();await start();}});
         t.diagnostic('Focused recovery journey verified the captured data and excluded later Contact and attachment edits.');
         t.diagnostic(JSON.stringify(timing));
         return;
@@ -337,7 +570,9 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       assert.match(home,/owner@example\.test/);
       const guidePath='/?view=getting-started';
       const workspacesPath='/?view=workspaces';
-      assert.ok(home.includes('href="'+guidePath+'"'));
+      assert.ok(home.includes('href="/?view=settings"'));
+      const settings=await request('/?view=settings',{headers});
+      assert.ok((await settings.text()).includes('href="'+guidePath+'"'));
       assert.ok(home.includes('href="'+workspacesPath+'"'));
       assert.match(home,/<details id="portable-record-import"><summary>Import Contacts CSV<\/summary>/);
       assert.match(home,/<details id="portable-workspace-sharing"><summary>Workspace sharing/);
@@ -360,7 +595,7 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       assert.equal(guide.status,200);
       const guideHtml=await guide.text();
       assert.ok(guideHtml.includes('href="/?view=workspaces#invite-teammate"'));
-      assert.match(guideHtml,/<nav[^>]*aria-label="CRM records"/);
+      assert.match(guideHtml,/<nav[^>]*aria-label="Main navigation"/);
       assert.match(guideHtml,/<h1[^>]*>Get started with Harbor<\/h1>/);
       assert.match(guideHtml,/<details id="portable-paired-import"><summary>Import Contacts and Companies CSV<\/summary>/);
       assert.match(guideHtml,/<details id="portable-record-import"><summary>Import Contacts CSV<\/summary>/);
@@ -749,11 +984,13 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       assert.equal((await company(headers,'&companyId='+companyRecord.id)).status,400);
       assert.equal((await deal(headers,'&id='+dealRecord.id+'&primaryContactId='+record.id)).status,400);
       const detailHtml=await (await request('/?kind=deals&record='+dealRecord.id,{headers})).text();
-      assert.match(detailHtml,/<summary>More properties<\/summary>/);
-      assert.match(detailHtml,/<dt>Next step<\/dt><dd>Review the proposal<\/dd>/);
+      assert.match(detailHtml,/View all properties<\/button>/);
+      assert.match(detailHtml,/<dialog[^>]*class="portable-properties-dialog"/);
+      assert.match(detailHtml,/<dt>Next step<\/dt><dd[^>]*>Review the proposal<\/dd>/);
       assert.match(detailHtml,/<button[^>]*>Edit all properties<\/button>/);
-      assert.match(detailHtml,new RegExp('href="/\\?contact='+record.id+'"'));
-      assert.match(detailHtml,new RegExp('href="/\\?record='+companyRecord.id+'&amp;kind=companies"'));
+      const backToDeal=encodeURIComponent('/?kind=deals&record='+dealRecord.id);
+      assert.ok(detailHtml.includes('href="/?contact='+record.id+'&amp;back='+backToDeal+'"'));
+      assert.ok(detailHtml.includes('href="/?record='+companyRecord.id+'&amp;kind=companies&amp;back='+backToDeal+'"'));
 
       const ownHtml=await (await request('/',{headers})).text();
       assert.match(ownHtml,/Owner edit [AB]/);
@@ -1179,7 +1416,7 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       sharing.taskRepeats=await verifyPortableTaskRepeats({request,origin,headers,other,sql,sharing,env});
       sharing.reports=await verifyPortableReports({request,origin,headers,other,sql,workspaceId:sharing.workspaceId});
       await verifyPortableReportCustomFilters({request,origin,headers,sql,workspaceId:sharing.workspaceId});
-      sharing.segment=await verifyPortableSegments({request,origin,headers,other,sql,workspaceId:sharing.workspaceId});
+      sharing.segment=await verifyPortableSegments({request,origin,headers,other,sql});
       sharing.staticSegments=await verifyPortableStaticSegments({request,origin,headers,other,sql});
       sharing.dashboard=await verifyPortableDashboards({request,origin,headers,other,sql,workspaceId:sharing.workspaceId,reports:sharing.reports});
       await verifyPortableManagerFollowUp({request,headers,other,sql});
@@ -1226,6 +1463,7 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       throw error;
     }finally{
       await stop();
+      await pool?.stop();
       fixture?.storage.destroy();
       await sql.end();
       await rm(directory,{recursive:true,force:true});

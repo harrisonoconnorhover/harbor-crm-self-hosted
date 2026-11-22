@@ -1,7 +1,10 @@
+import {subscriptionConfig,checkSubscriptionLink,readSubscribers} from './portable-stripe-subscription';
+import {ApiError} from '../lib/api-error';
+import {readCommerceCsv} from '../db/postgres/record-access-store';
 import {listPortableProducts,listPortableProductsForExport,readPortableProduct,savePortableProduct} from '../db/postgres/portable-product-store';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {billingLabels,productMutation,type Product} from '../lib/commerce';
-import {portableProductExportLimit,portableProductExportQuery,portableProductQuery} from '../lib/portable-products';
+import {portableProductExportLimit,productSubscriptionQuery,portableProductExportQuery,portableProductQuery} from '../lib/portable-products';
 import {exportCsvCell} from '../lib/shared-record-export';
 import {portableApiIdentity} from './portable-api-identity';
 import {portableDb} from './portable-db';
@@ -38,10 +41,24 @@ async function products(request:Request){
       return json(result);
     }
     if(params.size!==new Set(params.keys()).size)return json({error:'Invalid product query.'},400);
+    if(params.get('view')==='subscription'||params.get('view')==='subscribers'){
+      const query=productSubscriptionQuery.safeParse(Object.fromEntries(params));
+      if(!query.success)return json({error:'Choose one product.'},400);
+      const {id,revision,view,after}=query.data,config=subscriptionConfig(id);
+      if(!config||view==='subscribers'&&!config.subscribers)return json({error:'Checkout unavailable.'},404);
+      const record=await readPortableProduct(db,user,request.method!=='HEAD',id,config.workspaceId);
+      if(!record)return json({error:'Checkout unavailable.'},404);
+      if(record.revision!==revision)return json({error:'Reload the product before checking its price.'},409);
+      const result=view==='subscribers'?await readSubscribers(config,after):await checkSubscriptionLink(config,record);
+      const latest=await readPortableProduct(db,user,false,id,config.workspaceId);
+      if(!latest)return json({error:'Checkout unavailable.'},404);
+      if(latest.revision!==record.revision)return json({error:'The product changed. Reload it before sharing checkout.'},409);
+      return json(result);
+    }
     if(params.has('export')){
       const query=portableProductExportQuery.safeParse(Object.fromEntries(params));
       if(!query.success)return json({error:'Choose Products list filters to export.'},400);
-      const records=await listPortableProductsForExport(db,user.userId,query.data);
+      const records=await readCommerceCsv(db,user,'products',request.method,tx=>listPortableProductsForExport(tx,user.userId,query.data));
       if(records===null)return json({error:`More than ${portableProductExportLimit} products match. Narrow your filters to export the full list.`},413);
       return new Response(request.method==='HEAD'?null:productsCsv(records),{headers:{
         'cache-control':'private, no-store','x-content-type-options':'nosniff',
@@ -51,11 +68,11 @@ async function products(request:Request){
     const query=portableProductQuery.safeParse(Object.fromEntries(params));
     if(!query.success)return json({error:'Invalid product query.'},400);
     if(query.data.id){
-      const record=await readPortableProduct(db,user.userId,query.data.id);
+      const record=await readPortableProduct(db,user,request.method!=='HEAD',query.data.id);
       return record?json(record):json({error:'Product not found.'},404);
     }
-    return json(await listPortableProducts(db,user.userId,query.data));
-  }catch{return json({error:'Could not save or load products.'},500);}
+    return json(await listPortableProducts(db,user,request.method!=='HEAD',query.data));
+  }catch(error){return error instanceof ApiError?json({error:error.message},error.status):json({error:'Could not save or load products.'},500);}
 }
 
 export {products as GET,products as POST};

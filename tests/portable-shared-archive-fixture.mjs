@@ -74,6 +74,14 @@ export async function verifyPortableSharedArchive({request,origin,headers,other,
   assert.equal((await get(scoped(randomUUID()),other)).status,403);
   assert.equal((await get(scoped(sharing.grantId,{kind:'contacts'}),headers)).status,403);
 
+  const pendingNote={id:randomUUID(),body:'Owner follow-up',scheduledFor:Date.now()+3_600_000};
+  const jobs='/api/background-jobs?recordId='+records.contacts.id;
+  assert.equal((await send(jobs,pendingNote)).status,202);
+  const blocked=await send(scoped(),contactArchive,other);
+  assert.equal(blocked.status,409);
+  assert.deepEqual(Object.keys(await blocked.json()),['error'],'A shared editor cannot inspect the owner’s job receipt.');
+  assert.equal((await send(jobs,{action:'cancelNote',id:pendingNote.id})).status,200);
+
   // Viewers can neither list nor change the shared Recycle Bin.
   const viewerGrant=await changeGrant('viewer');
   try{

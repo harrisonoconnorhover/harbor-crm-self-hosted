@@ -7,6 +7,7 @@ import {EmailNeverLog} from '../app/email-never-log';
 import {PortableEmailTemplates} from './portable-email-template-ui';
 import {PortableConnectionPanel,type PersonalConnectionStatus} from './portable-personal-connection-panel';
 import './portable-contacts.css';
+import {PortableSettingsLayout} from './portable-settings-layout';
 import {PortableCrmHeader} from './portable-crm-header';
 import './portable-settings.css';
 
@@ -51,6 +52,7 @@ export function PortableEmailSettings({email,inboxAvailable,personal,outlook,out
 
   return <main className="portable-contacts">
     <PortableCrmHeader email={email} page="email-settings"/>
+    <PortableSettingsLayout active="email-settings">
     <section className="portable-settings-content" aria-labelledby="portable-email-heading">
       <header className="portable-settings-heading">
         <h1 id="portable-email-heading">Email settings</h1>
@@ -96,5 +98,6 @@ export function PortableEmailSettings({email,inboxAvailable,personal,outlook,out
         {url&&<label>Opt-out link<input readOnly value={url} onFocus={event=>event.target.select()}/></label>}
       </section>
     </section>
+    </PortableSettingsLayout>
   </main>;
 }

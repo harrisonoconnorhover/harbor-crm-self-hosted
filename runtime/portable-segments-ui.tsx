@@ -3,7 +3,9 @@
 import {useRouter} from 'next/navigation';
 import {useRef,useState,useTransition,type FormEvent} from 'react';
 import {lifecycles} from '../lib/crm';
+import {portableRecordPath} from '../lib/portable-record-path';
 import {recordSearchLimit} from '../lib/portable-records';
+import {maxPortableListGroups} from '../lib/portable-segments';
 import type {PortableSegment,PortableSegmentDefinition,PortableSegmentList,PortableSegmentMembers,PortableSegmentMembershipReceipt,PortableSegmentWrite} from '../lib/portable-segments';
 import {PortableCrmHeader} from './portable-crm-header';
 import './portable-contacts.css';
@@ -12,8 +14,9 @@ type MembershipChange=Extract<PortableSegmentWrite,{action:'members'}>;
 type Rule=PortableSegmentDefinition['criteria']['groups'][number][number];
 const format=new Intl.NumberFormat('en-US');
 
-function link({segment,q,memberQ,after}:{segment?:string;q?:string;memberQ?:string;after?:string}={}){
+function link({workspaceId,segment,q,memberQ,after}:{workspaceId?:string;segment?:string;q?:string;memberQ?:string;after?:string}={}){
   const query=new URLSearchParams({view:'segments'});
+  if(workspaceId)query.set('workspaceId',workspaceId);
   if(segment)query.set('segment',segment);
   if(q)query.set('q',q);
   if(memberQ)query.set('memberQ',memberQ);
@@ -21,20 +24,21 @@ function link({segment,q,memberQ,after}:{segment?:string;q?:string;memberQ?:stri
   return '/?'+query;
 }
 
-function MemberSearch({segment,q,memberQ,disabled}:{segment:string;q?:string;memberQ?:string;disabled:boolean}){
-  return <form action="/" method="get" role="search" aria-label="Find segment members">
+function MemberSearch({workspaceId,segment,q,memberQ,disabled}:{workspaceId?:string;segment:string;q?:string;memberQ?:string;disabled:boolean}){
+  return <form action="/" method="get" role="search" aria-label="Find list members">
     <input type="hidden" name="view" value="segments"/>
+    {workspaceId&&<input type="hidden" name="workspaceId" value={workspaceId}/>}
     <input type="hidden" name="segment" value={segment}/>
     {q&&<input type="hidden" name="q" value={q}/>}
     <label>Search members<input key={memberQ??''} name="memberQ" type="search" placeholder="Name or email"
       maxLength={recordSearchLimit} defaultValue={memberQ} disabled={disabled}/></label>
     <button type="submit" disabled={disabled}>Search members</button>
-    {memberQ&&!disabled&&<> <a href={link({segment,q})}>Clear member search</a></>}
+    {memberQ&&!disabled&&<> <a href={link({workspaceId,segment,q})}>Clear member search</a></>}
   </form>;
 }
 
-function ContactsTable({page,label,selection,onSelect,disabled}: {
-  page:PortableSegmentMembers;label:string;selection?:string[];onSelect?:(id:string)=>void;disabled:boolean;
+function ContactsTable({page,label,workspaceId,selection,onSelect,disabled}: {
+  page:Pick<PortableSegmentMembers,'items'>;workspaceId?:string;label:string;selection?:string[];onSelect?:(id:string)=>void;disabled:boolean;
 }){
   if(!page.items.length)return <p>No contacts on this page.</p>;
   return <div className="portable-contacts-table"><table aria-label={label}>
@@ -42,7 +46,7 @@ function ContactsTable({page,label,selection,onSelect,disabled}: {
     <tbody>{page.items.map(contact=><tr key={contact.id}>
       {selection&&<td><input type="checkbox" aria-label={'Select '+contact.name} checked={selection.includes(contact.id)}
         disabled={disabled} onChange={()=>onSelect?.(contact.id)}/></td>}
-      <th scope="row"><a href={'/?contact='+contact.id}>{contact.name}</a></th>
+      <th scope="row"><a href={portableRecordPath('contacts',contact.id,workspaceId)}>{contact.name}</a></th>
       <td>{contact.email||'—'}</td><td>{contact.lifecycle||'—'}</td>
     </tr>)}</tbody>
   </table></div>;
@@ -105,7 +109,7 @@ function StaticMembership({members,q,memberQ,after,editing,onPending}:{
         setPending(undefined);
         onPending(false);
         setSelected([]);
-        setError(result.error??'Could not update segment membership.');
+        setError(result.error??'Could not update list membership.');
         if(response.status===409)setRefreshRequired(true);
         return;
       }
@@ -157,7 +161,7 @@ function StaticMembership({members,q,memberQ,after,editing,onPending}:{
       </>}
     </>:<>
       <MemberSearch segment={segment.id} q={q} memberQ={memberQ} disabled={locked}/>
-      <ContactsTable page={members} label="Segment members" selection={selected} onSelect={toggle} disabled={locked}/>
+      <ContactsTable page={members} label="List members" selection={selected} onSelect={toggle} disabled={locked}/>
       {!locked&&(after||members.next)&&<nav aria-label="Member pages">
         {after&&<a href={link({segment:segment.id,q,memberQ})}>First members</a>}
         {members.next&&<a href={link({segment:segment.id,q,memberQ,after:members.next})}>Next members</a>}
@@ -166,8 +170,8 @@ function StaticMembership({members,q,memberQ,after,editing,onPending}:{
   </>;
 }
 
-export function PortableSegments({email,list,members,q,memberQ,after}:{
-  email:string;list:PortableSegmentList;members?:PortableSegmentMembers;q?:string;memberQ?:string;after?:string;
+export function PortableSegments({email,list,members,q,memberQ,after,origin}:{
+  email:string;origin:string;list:PortableSegmentList;members?:PortableSegmentMembers;q?:string;memberQ?:string;after?:string;
 }){
   const router=useRouter();
   const segment=members?.segment;
@@ -179,7 +183,9 @@ export function PortableSegments({email,list,members,q,memberQ,after}:{
   const mode=segment?.mode??newMode;
   const showFilters=mode==='active'||!segment&&initialMembers==='snapshot';
   const [error,setError]=useState('');
-  const ruleValue=(field:Rule['field'])=>segment?.criteria.groups[0]?.find(rule=>rule.field===field)?.value??'';
+  const [groupIds,setGroupIds]=useState(()=>segment?.criteria.groups.length?segment.criteria.groups.map((_,i)=>i):[0]);
+  const nextGroupId=useRef(groupIds.length);
+  const ruleValue=(id:number,field:Rule['field'])=>segment?.criteria.groups[id]?.find(rule=>rule.field===field)?.value??'';
 
   async function send(input:PortableSegmentWrite){
     if(busy)return;
@@ -189,12 +195,12 @@ export function PortableSegments({email,list,members,q,memberQ,after}:{
       const response=await fetch('/api/segments',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)});
       const result=await response.json() as {segment?:PortableSegment;ok?:true;error?:string};
       if(!response.ok){
-        setError(result.error??'Could not finish this segment request.');
+        setError(result.error??'Could not finish this list request.');
         return;
       }
       return result;
     }catch{
-      setError('Could not confirm the change. Reload to check the saved segment.');
+      setError('Could not confirm the change. Reload to check the saved list.');
     }finally{setBusy(false);}
   }
 
@@ -204,16 +210,21 @@ export function PortableSegments({email,list,members,q,memberQ,after}:{
     const data=new FormData(event.currentTarget);
     const name=String(data.get('name')??'').trim();
     const description=String(data.get('description')??'').trim();
-    const lifecycle=String(data.get('lifecycle')??'') as typeof lifecycles[number]|'';
-    const group:Rule[]=[];
-    if(lifecycle)group.push({field:'lifecycle',operator:'eq',value:lifecycle,valueTo:''});
-    for(const field of ['name','email'] as const){
-      const value=String(data.get(field+'Contains')??'').trim();
-      if(value)group.push({field,operator:'contains',value,valueTo:''});
+    const groups:Rule[][]=[];
+    for(const id of showFilters?groupIds:[]){
+      const group:Rule[]=[];
+      const lifecycle=String(data.get('lifecycle-'+id)??'') as typeof lifecycles[number]|'';
+      if(lifecycle)group.push({field:'lifecycle',operator:'eq',value:lifecycle,valueTo:''});
+      for(const field of ['name','email'] as const){
+        const value=String(data.get(field+'-'+id)??'').trim();
+        if(value)group.push({field,operator:'contains',value,valueTo:''});
+      }
+      if(group.length)groups.push(group);
+      else if(groupIds.length>1){setError('Add a filter to each group or remove the empty group.');return;}
     }
     const id=segment?.id??(createId.current??=crypto.randomUUID());
     const result=await send({action:'save',segment:{id,revision:segment?.revision??0,name,description,kind:'contacts',mode,
-      criteria:{groups:group.length?[group]:[]},...(!segment&&mode==='static'?{initialMembers}:{})}});
+      criteria:{groups},...(!segment&&mode==='static'?{initialMembers}:{})}});
     if(result?.segment){
       if(!segment||after)router.replace(link({segment:id,q,memberQ}));
       router.refresh();
@@ -230,33 +241,24 @@ export function PortableSegments({email,list,members,q,memberQ,after}:{
 
   return <main className="portable-contacts">
     <PortableCrmHeader email={email} page="segments"/>
-    <section aria-labelledby="portable-segments-title">
-      <div className="portable-contacts-heading"><h1 id="portable-segments-title">Segments</h1><a href={link({q})}>New segment</a></div>
-      <form action="/" method="get" aria-label="Find segments">
-        <input type="hidden" name="view" value="segments"/>
-        <label>Search segments<input name="q" type="search" maxLength={recordSearchLimit} defaultValue={q}/></label>
-        <button type="submit">Search</button>{' '}<a href={link()}>Clear search</a>
-      </form>
-      {list.segments.length?<div className="portable-contacts-table"><table aria-label="Saved segments">
-        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
-        <tbody>{list.segments.map(item=><tr key={item.id}>
-          <th scope="row"><a href={link({segment:item.id,q})} aria-current={item.id===segment?.id?'page':undefined}>{item.name}</a></th>
-          <td>{item.mode==='static'?'Static':'Active'}</td><td>{item.description||'—'}</td>
-        </tr>)}</tbody>
-      </table></div>:<p>No saved segments match this view.</p>}
-      {(!segment&&after||list.next)&&<nav aria-label="Segment pages">
-        {!segment&&after&&<a href={link({q})}>First segments</a>}
-        {list.next&&<a href={link({q,after:list.next})}>Next segments</a>}
-      </nav>}
-    </section>
+    <ListLibrary list={list} segment={segment?.id} q={q} after={after}/>
+    {members&&segment&&<section aria-label="List sharing">
+      <h2>List sharing</h2>
+      <p>{segment.shared?'Workspace teammates can open this list. Each sees only contacts they can already view.':'Only you can open this list.'}</p>
+      <button disabled={busy||membershipPending} type="button" onClick={async()=>{
+        if(await send({action:'share',id:segment.id,revision:segment.revision,shared:!segment.shared}))router.refresh();
+      }}>{segment.shared?'Stop sharing list':'Share list with workspace'}</button>
+      {segment.shared&&<label>Teammate link<input readOnly value={origin+link({segment:segment.id,workspaceId:members.workspaceId})}
+        onFocus={e=>e.currentTarget.select()}/></label>}
+    </section>}
     <section aria-labelledby="portable-segment-editor">
-      <h2 id="portable-segment-editor">{segment?'Edit '+segment.name:'Create a Contact segment'}</h2>
-      {mode==='active'&&<p>Members are contacts that meet every selected filter. Leave the filters empty to include all contacts.</p>}
-      {mode==='static'&&<p>Static segments hold a list of contacts you manage. They do not trigger automatic workflow enrollment.</p>}
+      <h2 id="portable-segment-editor">{segment?'Edit '+segment.name:'Create a contact list'}</h2>
+      {mode==='active'&&<p>A contact joins if it matches every filter in any one group. Leave a single group empty to include all contacts.</p>}
+      {mode==='static'&&<p>Add or remove contacts to manage a static list. They do not trigger automatic workflow enrollment.</p>}
       {error&&<p role="alert">{error}</p>}
-      <form onSubmit={save} aria-label="Segment settings">
+      <form onSubmit={save} aria-label="List settings">
         <fieldset disabled={busy||membershipPending}>
-          {segment?<p>Type: {mode==='static'?'Static':'Active'}</p>:<label>Segment type<select value={newMode}
+          {segment?<p>Type: {mode==='static'?'Static':'Active'}</p>:<label>List type<select value={newMode}
             onChange={event=>setNewMode(event.target.value==='static'?'static':'active')}>
             <option value="active">Active</option><option value="static">Static</option>
           </select></label>}
@@ -269,16 +271,22 @@ export function PortableSegments({email,list,members,q,memberQ,after}:{
           </select></label>
           {initialMembers==='snapshot'&&<p>Harbor adds contacts that match these filters now. Empty filters include all current contacts.</p>}
         </fieldset>}
-        {showFilters&&<fieldset disabled={busy||membershipPending}>
-          <label>Lifecycle stage<select name="lifecycle" defaultValue={ruleValue('lifecycle')}>
-            <option value="">Any stage</option>
-            {lifecycles.map(stage=><option key={stage}>{stage}</option>)}
-          </select></label>
-          <label>Name contains<input name="nameContains" defaultValue={ruleValue('name')} maxLength={recordSearchLimit}/></label>
-          <label>Email contains<input name="emailContains" defaultValue={ruleValue('email')} maxLength={recordSearchLimit}/></label>
-        </fieldset>}
-        <button type="submit" disabled={busy||membershipPending}>{busy?'Saving…':'Save segment'}</button>{' '}
-        {segment&&<button type="button" disabled={busy||membershipPending} onClick={()=>void remove()}>Delete segment</button>}
+        {showFilters&&<>
+          {groupIds.map((id,index)=><fieldset key={id} disabled={busy||membershipPending}>
+            <legend>{(index?'Or match group ':'Match group ')+(index+1)}</legend>
+            <label>Lifecycle stage<select name={'lifecycle-'+id} defaultValue={ruleValue(id,'lifecycle')}>
+              <option value="">Any stage</option>
+              {lifecycles.map(stage=><option key={stage}>{stage}</option>)}
+            </select></label>
+            <label>Name contains<input name={'name-'+id} defaultValue={ruleValue(id,'name')} maxLength={recordSearchLimit}/></label>
+            <label>Email contains<input name={'email-'+id} defaultValue={ruleValue(id,'email')} maxLength={recordSearchLimit}/></label>
+            {groupIds.length>1&&<button type="button" onClick={()=>setGroupIds(groupIds.filter(key=>key!==id))}>Remove group {index+1}</button>}
+          </fieldset>)}
+          {groupIds.length<maxPortableListGroups&&<button type="button" disabled={busy||membershipPending}
+            onClick={()=>setGroupIds([...groupIds,nextGroupId.current++])}>Add OR group</button>}
+        </>}
+        <button type="submit" disabled={busy||membershipPending}>{busy?'Saving…':'Save list'}</button>{' '}
+        {segment&&<button type="button" disabled={busy||membershipPending} onClick={()=>void remove()}>Delete list</button>}
       </form>
     </section>
     {members&&<section aria-labelledby="portable-segment-members">
@@ -287,12 +295,53 @@ export function PortableSegments({email,list,members,q,memberQ,after}:{
         onPending={setMembershipPending}/>:<>
         <p>Membership reflects the current saved filters and contact properties.</p>
         <MemberSearch segment={members.segment.id} q={q} memberQ={memberQ} disabled={busy}/>
-        <ContactsTable page={members} label="Segment members" disabled={busy}/>
+        <ContactsTable page={members} label="List members" disabled={busy}/>
         {(after||members.next)&&<nav aria-label="Member pages">
           {after&&<a href={link({segment:members.segment.id,q,memberQ})}>First members</a>}
           {members.next&&<a href={link({segment:members.segment.id,q,memberQ,after:members.next})}>Next members</a>}
         </nav>}
       </>}
+    </section>}
+  </main>;
+}
+
+
+type ListLibraryData={segments:Pick<PortableSegment,'id'|'name'|'description'|'mode'>[];next:string|null};
+function ListLibrary({list,segment,q,after,workspaceId}:{list:ListLibraryData;segment?:string;q?:string;after?:string;workspaceId?:string}){
+  return     <section aria-labelledby="portable-segments-title">
+      <div className="portable-contacts-heading"><h1 id="portable-segments-title">Lists</h1>{!workspaceId&&<a href={link({q})}>New list</a>}</div>
+      <form action="/" method="get" aria-label="Find lists">
+        <input type="hidden" name="view" value="segments"/>
+        {workspaceId&&<input type="hidden" name="workspaceId" value={workspaceId}/>}
+        <label>Search lists<input name="q" type="search" maxLength={recordSearchLimit} defaultValue={q}/></label>
+        <button type="submit">Search</button>{' '}<a href={link({workspaceId})}>Clear search</a>
+      </form>
+      {list.segments.length?<div className="portable-contacts-table"><table aria-label="Saved lists">
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
+        <tbody>{list.segments.map(item=><tr key={item.id}>
+          <th scope="row"><a href={link({workspaceId,segment:item.id,q})} aria-current={item.id===segment?'page':undefined}>{item.name}</a></th>
+          <td>{item.mode==='static'?'Static':'Active'}</td><td>{item.description||'—'}</td>
+        </tr>)}</tbody>
+      </table></div>:<p>No saved lists match this view.</p>}
+      {(!segment&&after||list.next)&&<nav aria-label="List pages">
+        {!segment&&after&&<a href={link({workspaceId,q})}>First lists</a>}
+        {list.next&&<a href={link({workspaceId,q,after:list.next})}>Next lists</a>}
+      </nav>}
+    </section>;
+}
+
+export function SharedLists({email,workspaceId,list,members,q,memberQ,after}:{email:string;workspaceId:string;list:ListLibraryData;
+  members?:Pick<PortableSegmentMembers,'items'|'total'|'next'>&{segment:ListLibraryData['segments'][number]};q?:string;memberQ?:string;after?:string}){
+  const segment=members?.segment.id;
+  return <main className="portable-contacts">
+    <PortableCrmHeader email={email} workspaceId={workspaceId} page="segments"/>
+    <ListLibrary list={list} segment={segment} q={q} after={after} workspaceId={workspaceId}/>
+    {members&&segment&&<section aria-label="Shared list members"><h2>{members.segment.name}</h2>
+      <p>{memberQ?'Matching contacts':'Contacts you can view'} · {format.format(members.total as `${number}`)}</p>
+      <MemberSearch workspaceId={workspaceId} segment={segment} q={q} memberQ={memberQ} disabled={false}/>
+      <ContactsTable workspaceId={workspaceId} page={members} label="List members" disabled={false}/>
+      {after&&<a href={link({workspaceId,segment,q,memberQ})}>First members</a>}
+      {members.next&&<a href={link({workspaceId,segment,q,memberQ,after:members.next})}>Next members</a>}
     </section>}
   </main>;
 }

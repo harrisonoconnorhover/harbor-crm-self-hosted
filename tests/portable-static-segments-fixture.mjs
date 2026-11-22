@@ -43,13 +43,16 @@ export async function verifyPortableStaticSegments({request,origin,headers,other
     return (await result.json()).record;
   };
   const first=await createContact('First','Evangelist');
-  const second=await createContact('Second','Evangelist');
+  const second=await createContact('Second','Customer');
   const outside=await createContact('Later matches','Lead');
   const archived=await createContact('Archived','Evangelist');
   const foreign=await createContact('Foreign','Evangelist',other);
   await archive(archived,'archive');
   const definition={id:randomUUID(),revision:0,name:label+' snapshot',kind:'contacts',mode:'static',
-    criteria:{groups:[[{field:'name',operator:'contains',value:label},{field:'lifecycle',operator:'eq',value:'Evangelist'}]]}};
+    criteria:{groups:[
+      [{field:'name',operator:'contains',value:label},{field:'lifecycle',operator:'eq',value:'Evangelist'}],
+      [{field:'name',operator:'contains',value:label},{field:'lifecycle',operator:'eq',value:'Customer'}],
+    ]}};
   const draft={...definition,initialMembers:'snapshot'};
   const snapshot=await createSegment(draft);
   const empty=await createSegment({...definition,id:randomUUID(),name:label+' empty'});

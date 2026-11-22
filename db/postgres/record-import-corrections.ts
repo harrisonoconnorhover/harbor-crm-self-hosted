@@ -96,6 +96,7 @@ export async function prepareReviewedCsv(db:PostgresJsDatabase,workspaceId:strin
   const matched=new Set(matches.flatMap((match,i)=>match.record?[i+2]:[]));
   const prepared=preparePortableRecordCsv(kind,validationSource(csv,matches,kind),pipelines,stageFields,matched);
   const updates:CsvCorrection[]=[];
+  const previewedIds=new Set<string>();
   const pipelineById=new Map([builtinPipeline,...pipelines].map(p=>[p.id,p]));
   function evaluate<T extends Fields|{data:DealFields;pipelineId:string|null;stageId:string|null}>(row:RecordImportRow<T>):RecordImportRow<T>{
     const index=row.row-2,{record:current,error}=matches[index];
@@ -131,12 +132,14 @@ export async function prepareReviewedCsv(db:PostgresJsDatabase,workspaceId:strin
       updates.push({current,data,pipelineId:deal?.pipelineId??null,stageId:deal?.stageId??null,
         preview:{row:row.row,state:'update',name:current.data.name,...identity,changes}});
     }
+    // Both update rows and no-change rows show the saved record name.
+    previewedIds.add(current.id);
     return {row:row.row,state:'skip',message:changes.length?'Existing '+singular[kind]+'.':'No changes to matched '+singular[kind]+': '+current.data.name+'.'};
   }
   if(prepared.kind==='contacts')prepared.rows=prepared.rows.map(row=>evaluate(row));
   if(prepared.kind==='companies')prepared.rows=prepared.rows.map(row=>evaluate(row));
   if(prepared.kind==='deals')prepared.rows=prepared.rows.map(row=>evaluate(row));
-  return {prepared,updates};
+  return {prepared,updates,previewedIds:[...previewedIds]};
 }
 
 export async function applyRecordCorrections(tx:Tx,workspaceId:string,actorId:string,kind:PortableRecordKind,updates:CsvCorrection[]){

@@ -14,7 +14,8 @@ const customPatch={custom:portableCustomPatch.optional()};
 const assignment={assigneeId:z.string().min(1).max(200).nullable().optional()};
 const recordId=z.string().guid("Invalid uuid");
 const builtinStage=z.enum(stages);
-export const dealCloseMonth=z.union([z.literal('undated'),z.string().regex(/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/)]);
+export const calendarMonth=z.string().regex(/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/);
+export const dealCloseMonth=z.union([z.literal('undated'),calendarMonth]);
 export const portableRecordKind=portableCustomPropertyKinds;
 export type PortableRecordKind=z.infer<typeof portableRecordKind>;
 export const portableRecordLabels={contacts:'Contact',companies:'Company',deals:'Deal'} satisfies Record<PortableRecordKind,string>;
@@ -32,8 +33,8 @@ export const portableContactTextPatch=z.object({
   action:z.literal('patchContactText'),id:recordId,expectedRevision:z.number().int().min(1).max(2147483646),
   field:z.enum(portableContactTextFields),value:z.string().max(2048).nullable(),
 }).strict();
-const companyWrite=writeSchema(z.object({action:z.literal('save'),kind:z.literal('companies'),...assignment,data:portableCompanyFields.extend(customPatch)}));
-const dealWrite=writeSchema(z.object({action:z.literal('save'),kind:z.literal('deals'),...assignment,data:portableDealFields.extend(customPatch),
+const companyWrite=writeSchema(z.object({action:z.literal('save'),kind:z.literal('companies'),...assignment,data:portableCompanyFields.extend({...customPatch,industry:portableCompanyFields.shape.industry.removeDefault().optional()})}));
+const dealWrite=writeSchema(z.object({action:z.literal('save'),kind:z.literal('deals'),...assignment,data:portableDealFields.extend({...customPatch,stage:portableDealFields.shape.stage.removeDefault().optional(),amount:portableDealFields.shape.amount.removeDefault().optional(),closeDate:portableDealFields.shape.closeDate.removeDefault().optional()}),
   pipelineId:recordId.nullable().optional(),stageId:recordId.nullable().optional(),
   companyId:recordId.nullable().optional(),primaryContactId:recordId.nullable().optional()}));
 export const portableRecordWrite=z.union([contactWrite,companyWrite,dealWrite]);
@@ -51,7 +52,7 @@ export const portableRecordReadFields=z.object({
   kind:portableRecordKind.default('contacts'),
   id:recordId.optional(),after:z.string().max(55).optional(),limit:z.coerce.number().int().min(1).max(50).default(25),
   sort:portableContactSort.optional(),
-  search:portableRecordSearch.optional(),owner:z.union([z.enum(['mine','unassigned','unavailable']),z.string().guid("Invalid uuid").toLowerCase()]).optional(),
+  search:portableRecordSearch.optional(),owner:z.union([z.enum(['mine','unassigned','unavailable','editable']),z.string().guid("Invalid uuid").toLowerCase()]).optional(),
   stage:z.string().min(1).max(80).optional(),pipelineId:pipelineKey.optional(),closeMonth:dealCloseMonth.optional(),
   workspaceId:recordId.optional(),
   companyId:recordId.optional(),primaryContactId:recordId.optional(),
@@ -76,11 +77,11 @@ export type CompanyWrite=z.output<typeof companyWrite>;
 export type DealWrite=z.output<typeof dealWrite>;
 type PortableRecord<Fields>={id:string;revision:number;data:Fields;createdAt:string;updatedAt:string};
 export type ContactRecord=PortableRecord<ContactFields>&{primaryCompanyId:string|null;primaryCompanyName:string|null};
-export type CompanyRecord=PortableRecord<CompanyFields>;
-export type DealRecord=PortableRecord<DealFields>&{
+export type CompanyRecord=PortableRecord<Omit<CompanyFields,'industry'>&{industry?:string}>;
+export type DealRecord=PortableRecord<Omit<DealFields,'amount'|'closeDate'>&{amount?:number;closeDate?:string}>&{
   pipelineId:string|null;stageId:string|null;pipelineName:string;stageName:string;
   companyId:string|null;companyName:string|null;primaryContactId:string|null;primaryContactName:string|null;
 };
 export type PortableDealLane={stage:PipelineStage;cards:DealRecord[];more:boolean};
 
-export type DealStageTotals={stageId:string|null;dealCount:number;amount:`${number}`;weightedOpen:`${number}`};
+export type DealStageTotals={month?:string|null;wonAmount?:`${number}`|null;stageId:string|null;dealCount:number;amount:`${number}`|null;weightedOpen:`${number}`|null};

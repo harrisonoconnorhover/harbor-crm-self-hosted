@@ -1,3 +1,4 @@
+import type {QuoteSignatureReceipt} from './portable-quote-signing';
 import {z} from 'zod';
 import {dateOnly,quoteData,quoteStatuses,type Quote,type QuoteSnapshot} from './quotes';
 
@@ -43,6 +44,6 @@ export const portableQuoteStatus=(publishedAt:string|null,disposition:PortableQu
   disposition??(publishedAt===null?'draft':'published');
 export const portableQuoteStatusLabels={draft:'Draft',published:'Published',accepted:'Accepted',declined:'Declined',voided:'Voided',expired:'Expired'} satisfies Record<PortableQuoteDisplayStatus,string>;
 export type PortableQuoteVersion={version:number;publishedAt:string};
-export type PortableQuoteDetail={quote:Quote;history:{revision:number;action:PortableQuoteAction;actorName:string|null;at:string;note:string|null}[];
+export type PortableQuoteDetail={signingLinkId:string|null;signature:QuoteSignatureReceipt|null;quote:Quote;history:{revision:number;action:PortableQuoteAction;actorName:string|null;at:string;note:string|null}[];
   next:number|null;versions:PortableQuoteVersion[];nextVersion:number|null;
   published:(PortableQuoteVersion&{snapshot:QuoteSnapshot})|null};

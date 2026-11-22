@@ -1,6 +1,9 @@
+import {readCommerceCsv,readCommerceResult} from '../db/postgres/record-access-store';
+import {manageQuoteSigningLink} from '../db/postgres/quote-signing-store';
+import {signingLinkChange} from '../lib/portable-quote-signing';
+import {quoteAttachment} from './portable-quote-receipt';
 import {listPortableQuotes,listPortableQuotesForExport,readPortableQuote,savePortableQuote} from '../db/postgres/portable-quote-store';
 import {ApiError} from '../lib/api-error';
-import {quoteHTML} from '../lib/quotes';
 import {readBoundedRequestText} from '../lib/bounded-request-text';
 import {portableQuoteExport,portableQuoteExportLimit,portableQuoteMutation,portableQuoteQuery,portableQuoteStatusLabels} from '../lib/portable-quotes';
 import {exportCsvCell} from '../lib/shared-record-export';
@@ -29,6 +32,11 @@ async function quotes(request:Request){
         if(text===null)return json({error:'Use at most 100 quote items with shorter descriptions.'},413);
         body=JSON.parse(text);
       }catch{return json({error:'Supply valid JSON.'},400);}
+      const link=signingLinkChange.safeParse(body);
+      if(link.success){
+        if(user.guest||request.headers.get('origin')!==new URL(request.url).origin)return json({error:'Manage signing links in your own workspace.'},403);
+        return json(await manageQuoteSigningLink(db,user.userId,link.data));
+      }
       const input=portableQuoteMutation.safeParse(body);
       if(!input.success)return json({error:'Check the quote fields.'},400);
       const result=await savePortableQuote(db,user,input.data);
@@ -40,7 +48,7 @@ async function quotes(request:Request){
     if(params.has('export')){
       const query=portableQuoteExport.safeParse(Object.fromEntries(params));
       if(!query.success)return json({error:'Choose quote list filters to export.'},400);
-      const rows=await listPortableQuotesForExport(db,user.userId,query.data);
+      const rows=await readCommerceCsv(db,user,'quotes',request.method,tx=>listPortableQuotesForExport(tx,user.userId,query.data));
       if(rows===null)return json({error:`More than ${portableQuoteExportLimit} quotes match. Narrow your filters to export the full list.`},413);
       return new Response(request.method==='HEAD'?null:quotesCsv(rows),{headers:{
         'cache-control':'private, no-store','x-content-type-options':'nosniff',
@@ -50,21 +58,18 @@ async function quotes(request:Request){
     const query=portableQuoteQuery.safeParse(Object.fromEntries(params));
     if(!query.success)return json({error:'Invalid quote query.'},400);
     if(query.data.id){
-      const detail=await readPortableQuote(db,user.userId,query.data.id,query.data);
-      if(!detail)return json({error:'Quote or version not found.'},404);
-      if(query.data.download){
+      const options=query.data,id=query.data.id;
+      if(options.download)return await readCommerceResult(db,user,'quotes',request.method!=='HEAD'&&'document',async tx=>{
+        const detail=await readPortableQuote(tx,user,false,id,options);
+        if(!detail)return json({error:'Quote or version not found.'},404);
         if(!detail.published||detail.quote.number===null)return json({error:'Publish the quote before downloading a version.'},400);
-        const {quote,published}=detail;
-        return new Response(quoteHTML(quote,published.snapshot,published.publishedAt,published.version),{headers:{
-          'content-type':'text/html; charset=utf-8',
-          'content-disposition':`attachment; filename="Harbor-Q-${quote.number}-v${published.version}.html"`,
-          'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; img-src data:",
-          'cache-control':'private, no-store','x-content-type-options':'nosniff',
-        }});
-      }
-      return json(detail);
+        const {quote,published,signature}=detail;
+        return quoteAttachment(quote,published,signature);
+      },response=>response.ok?[id]:[]);
+      const detail=await readPortableQuote(db,user,request.method!=='HEAD',id,options);
+      return detail?json(detail):json({error:'Quote or version not found.'},404);
     }
-    return json(await listPortableQuotes(db,user.userId,query.data));
+    return json(await listPortableQuotes(db,user,request.method!=='HEAD',query.data));
   }catch(error){
     if(error instanceof ApiError)return json({error:error.message},error.status);
     return json({error:'Could not save or load quotes.'},500);

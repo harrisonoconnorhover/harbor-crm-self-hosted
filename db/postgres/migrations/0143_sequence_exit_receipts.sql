@@ -1,0 +1,2 @@
+CREATE INDEX "portable_confirmed_contact_meetings" ON "portable_calendar_meetings" USING btree ("workspace_id","contact_id","created_at") WHERE "portable_calendar_meetings"."status"='scheduled';--> statement-breakpoint
+CREATE INDEX "portable_gmail_contact_received" ON "portable_gmail_log_receipts" USING btree ("workspace_id","contact_id","mailbox","occurred_at");

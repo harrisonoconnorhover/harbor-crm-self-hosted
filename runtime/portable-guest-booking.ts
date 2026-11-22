@@ -1,10 +1,12 @@
+import {readSharedTeamBusy} from './portable-team-freebusy';
+import {publicTeamCalendar,teamSlotPage} from '../db/postgres/team-booking-store';
 import {findPortablePublishedAvailability} from '../db/postgres/published-availability-store';
 import {claimPortableGuestRequest,portableGuestDeliveryAllowed,prunePortableGuestRequests,recordPortableGuestDelivery,
   verifyPortableGuestRequest} from '../db/postgres/guest-booking-store';
 import {portableOpenCalendarSlots} from '../db/postgres/portable-meeting-store';
 import {deliverGuestCode} from '../lib/calendar/guest-booking-mail';
-import {guestBookingRoute} from '../lib/calendar/guest-booking-route';
-import {guestPageUnavailable,processGuestBooking,type GuestBookingInput} from '../lib/calendar/guest-booking';
+import {guestBookingRoute,type TeamGuestBookingInput} from '../lib/calendar/guest-booking-route';
+import {guestPageUnavailable,processGuestBooking} from '../lib/calendar/guest-booking';
 import {portableCalendarConfig} from './portable-calendar-config';
 import {portableDb} from './portable-db';
 import {portableGmailAccessToken,portableGmailConfig} from './portable-gmail-config';
@@ -22,17 +24,21 @@ export function portableGuestBookingEnabled(){
   return !!mailbox&&portableCalendarConfig()?.owner===mailbox.owner;
 }
 
-async function portableGuestBooking(pageId:string,input:GuestBookingInput){
+async function portableGuestBooking(pageId:string,input:TeamGuestBookingInput){
   const db=portableDb(),mail=portableGmailConfig(),calendar=portableCalendarConfig();
-  const page=await findPortablePublishedAvailability(db,pageId);
+  const personal=await findPortablePublishedAvailability(db,pageId);
+  const team=personal?undefined:await publicTeamCalendar(db,pageId);
+  const page=personal??(team&&{...team.page,ownerId:team.ownerId,email:team.email,slots:[],allowGuestProof:true,team:true});
   if(!page?.allowGuestProof||!mail||mail.owner!==page.email||calendar?.owner!==page.email||portableWorkspaceGuest(page.email))throw guestPageUnavailable();
   const rate=await portableRateLimit('public_form','booking:'+page.id);
   if(rate)throw new ApiError(rate.status,'Please wait before trying again.');
+  const alternativeStart=input.action==='verify'?input.alternativeStart:undefined;
+  if(alternativeStart&&!team)throw new ApiError(400,'Choose a time on a team booking page.');
   return processGuestBooking(input,{
-    load:async()=>({...page,slots:await portableOpenCalendarSlots(db,page.ownerId,page.slots)}),
+    load:async(start)=>({...page,slots:team?(await teamSlotPage(db,team.page,readSharedTeamBusy,{start})).slots:await portableOpenCalendarSlots(db,page.ownerId,page.slots)}),
     claim:claim=>claimPortableGuestRequest(db,page,claim),
     verify:(requestId,hash,now)=>verifyPortableGuestRequest(db,page,requestId,hash,now,
-      ()=>issueGuestStatusReceipt(loginConfig(env),{workspaceId:page.workspaceId,pageId:page.id,requestId},now)),
+      ()=>issueGuestStatusReceipt(loginConfig(env),{workspaceId:page.workspaceId,pageId:page.id,requestId},now),readSharedTeamBusy,alternativeStart),
     async send(claim,code){
       let delivery='blocked',providerId:string|undefined;
       try{
@@ -55,5 +61,5 @@ async function portableGuestBooking(pageId:string,input:GuestBookingInput){
 }
 
 export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){
-  return guestBookingRoute(request,(await params).id,portableGuestBookingEnabled(),portableGuestBooking);
+  return guestBookingRoute(request,(await params).id,portableGuestBookingEnabled(),portableGuestBooking,true);
 }

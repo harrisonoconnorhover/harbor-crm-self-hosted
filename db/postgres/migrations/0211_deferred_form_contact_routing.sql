@@ -1,0 +1,2 @@
+ALTER TABLE "portable_lead_events" ADD COLUMN "captured_new_contact" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_lead_events" ADD CONSTRAINT "portable_lead_event_captured_contact" CHECK (NOT "portable_lead_events"."captured_new_contact" OR ("portable_lead_events"."revision"=1 AND "portable_lead_events"."intake_form_id" IS NOT NULL AND "portable_lead_events"."data"->>'contactId' IS NOT NULL AND "portable_lead_events"."data"->>'assigneeId' IS NULL));

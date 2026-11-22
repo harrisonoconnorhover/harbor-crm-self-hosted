@@ -1,0 +1,3 @@
+ALTER TABLE "portable_record_access_events" DROP CONSTRAINT "record_access_action";--> statement-breakpoint
+CREATE INDEX "record_access_workspace_email_time" ON "portable_record_access_events" USING btree ("workspace_id",lower("actor_email"),"occurred_at","id");--> statement-breakpoint
+ALTER TABLE "portable_record_access_events" ADD CONSTRAINT "record_access_action" CHECK ("portable_record_access_events"."action" IN ('detail','list','csv','integration','search','report','related','history') AND (("portable_record_access_events"."token_id" IS NOT NULL) = ("portable_record_access_events"."action"='integration')));

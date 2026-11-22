@@ -1,19 +1,16 @@
-import {and,eq,exists,sql,type SQL,type SQLWrapper} from 'drizzle-orm';
+import {eq,sql,type SQL,type SQLWrapper} from 'drizzle-orm';
 import type {PgTable} from 'drizzle-orm/pg-core';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {SharedRecordWriteScope} from '../../lib/portable-workspace-access';
 import {loginIdentities} from './identity-schema';
-import {workspaceViewers} from './workspace-viewer-schema';
+import {ownedRecordScope,type RecordOwnership} from './record-ownership-scope';
 import {privateWorkspaces} from './workspace-schema';
 
 // The Recycle Bin belongs to the owner and to editors holding the named grant.
 // Viewers can't list, archive or restore records.
-export function archiveWorkspaceScope(db:Pick<PostgresJsDatabase,'select'>,actorId:string,shared?:SharedRecordWriteScope):SQL{
+export function archiveWorkspaceScope(db:Pick<PostgresJsDatabase,'select'>,actorId:string,shared:SharedRecordWriteScope|undefined,record:RecordOwnership):SQL{
   if(!shared)return eq(privateWorkspaces.ownerId,actorId);
-  const editor=db.select({id:workspaceViewers.id}).from(workspaceViewers).where(and(
-    eq(workspaceViewers.workspaceId,privateWorkspaces.id),eq(workspaceViewers.id,shared.grantId),
-    eq(workspaceViewers.viewerId,actorId),eq(workspaceViewers.role,'editor')));
-  return and(eq(privateWorkspaces.id,shared.workspaceId),exists(editor))!;
+  return ownedRecordScope(db,actorId,shared.workspaceId,record,'edit',undefined,shared.grantId);
 }
 
 // An archived record can't be edited, so its current revision is the archive event.

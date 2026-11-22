@@ -1,0 +1,1 @@
+ALTER TABLE "portable_directory_users" ADD COLUMN "display_name" varchar(254);

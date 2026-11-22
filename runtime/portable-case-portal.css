@@ -1,0 +1,12 @@
+.portable-case-settings { max-width:46rem; margin:1rem 0; border:1px solid #cedbd9; border-radius:.55rem; background:white; color:#233738; }
+.portable-case-settings > summary { cursor:pointer; padding:.85rem 1rem; font-weight:650; }
+.portable-case-controls { display:grid; gap:.8rem; padding:0 1rem 1rem; }
+.portable-case-controls :is(form,section) { display:grid; gap:.6rem; padding:.85rem 0 0; border:0; border-top:1px solid #dbe3e1; margin:0; }
+.portable-case-controls :is(p,h3) { margin:0; }
+.portable-case-controls h3 { font-size:1rem; }
+.portable-case-controls fieldset { display:grid; gap:.75rem; padding:0; border:0; min-inline-size:0; }
+.portable-case-controls label { display:grid; gap:.3rem; }
+.portable-case-controls :is(input,textarea) { width:100%; min-width:0; box-sizing:border-box; }
+.portable-case-actions { display:flex; gap:.5rem; flex-wrap:wrap; }
+.portable-case-link { display:grid; gap:.5rem; justify-items:start; }
+.portable-case-link label { width:100%; }

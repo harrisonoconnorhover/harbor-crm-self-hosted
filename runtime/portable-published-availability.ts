@@ -1,3 +1,7 @@
+import {portableGuestBookingEnabled} from './portable-guest-booking';
+import {portableRateLimit} from './portable-rate-limit';
+import {readSharedTeamBusy} from './portable-team-freebusy';
+import {publicTeamCalendar,teamSlotPage} from '../db/postgres/team-booking-store';
 import {z} from 'zod';
 import {findPortablePublishedAvailability,portableOwnerAvailability,savePortableAvailability} from '../db/postgres/published-availability-store';
 import {portableOpenCalendarSlots} from '../db/postgres/portable-meeting-store';
@@ -39,12 +43,18 @@ export function portableAvailabilityRoute(request:Request){
   });
 }
 
-export async function readPortablePublishedAvailability(id:string){
+export async function readPortablePublishedAvailability(id:string,after?:string){
   if(!enabled())return null;
   const account=portableCalendarConfig();
   if(!account)return null;
   const db=portableDb(),page=await findPortablePublishedAvailability(db,id);
-  if(!page||page.email!==account.owner||portableWorkspaceGuest(page.email))return null;
+  if(!page){
+    const team=await publicTeamCalendar(db,id);
+    if(!team||!portableGuestBookingEnabled()||team.email!==account.owner||portableWorkspaceGuest(team.email))return null;
+    if(await portableRateLimit('public_form','team-times:'+id))return null;
+    return {id,title:team.page.title,timeZone:'UTC',...await teamSlotPage(db,team.page,readSharedTeamBusy,{after}),allowGuestProof:true};
+  }
+  if(page.email!==account.owner||portableWorkspaceGuest(page.email))return null;
   const future=futurePublishedSlots(page.slots);
   if(!future.length)return null;
   const slots=await portableOpenCalendarSlots(db,page.ownerId,future);

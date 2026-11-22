@@ -1,0 +1,82 @@
+.portable-contacts > .team-inbox { max-width: 78rem; margin: 1.25rem auto; padding: clamp(1rem, 3vw, 2.5rem); border: 1px solid #d7e2e1; border-radius: 12px; background: white; }
+.team-inbox .inbox-heading, .inbox-msg header, .inbox-compose h2, .inbox-compose-actions, .inbox-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; }
+.team-inbox .inbox-history-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.team-inbox .inbox-heading { justify-content: space-between; margin-block-end: 1rem; }
+.team-inbox h1 { margin: .25rem 0; overflow-wrap: anywhere; font-size: clamp(1.55rem, 2.5vw, 2rem); }
+.team-inbox h2 { margin: .1rem 0 .85rem; font-size: 1.15rem; }
+.team-inbox h3 { margin-top: 1.5rem; font-size: .98rem; }
+.team-inbox .inbox-back,.team-inbox .inbox-mailbox,.team-inbox .inbox-send { display: inline-flex; align-items: center; gap: .45rem; }
+.team-inbox .inbox-back { margin-bottom: 1.35rem; }
+.team-inbox .inbox-mailbox,.team-inbox time,.team-inbox .inbox-delivery { font-size: .83rem; color: #52666c; }
+.team-inbox .inbox-tabs { display: flex; flex-wrap: wrap; gap: .3rem; margin: 0 0 1rem; border-bottom: 1px solid #dae3e2; }
+.team-inbox .inbox-tabs a { padding: .55rem .9rem; text-decoration: none; }
+.team-inbox .inbox-tabs [aria-current="page"] { color: #075e63; font-weight: 700; border-bottom: 3px solid #14787d; }
+.team-inbox .inbox-list,.team-inbox .inbox-messages { list-style: none; padding: 0; margin: 0; }
+.team-inbox .inbox-list > li { display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: center; padding: 1rem .5rem; border-bottom: 1px solid #e1e8e7; }
+.team-inbox .inbox-list > li > svg { color: #66837e; }
+.team-inbox .inbox-list a { font-weight: 650; }
+.team-inbox .inbox-list p,.team-inbox .inbox-details p { color: #52666c; margin: .2rem 0; }
+.team-inbox .inbox-claim-open { justify-self: end; }
+.team-inbox .inbox-list-meta { display: grid; gap: .2rem; text-align: right; }
+.team-inbox .inbox-deadline time { color: inherit; }
+.team-inbox .inbox-deadline[data-overdue] { color: #953817; }
+.team-inbox .inbox-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(13rem, 19rem); gap: clamp(1rem, 3vw, 2.5rem); }
+.team-inbox .inbox-details { padding: 1.15rem; align-self: start; background: #f6f9f8; border: 1px solid #dbe4e2; border-radius: 10px; overflow-wrap: anywhere; }
+.team-inbox .inbox-details dt { margin-top: .8rem; font-size: .84rem; color: #53696c; }
+.team-inbox .inbox-details dd { margin: .2rem 0; }
+.team-inbox .inbox-tags { display: flex; flex-wrap: wrap; gap: .3rem; margin: .35rem 0; }
+.team-inbox .inbox-tags :is(span,a),.team-inbox .inbox-pill { padding: .16rem .5rem; border-radius: 1rem; background: #edf4f1; color: #285c51; font-size: .8rem; }
+.team-inbox .inbox-msg,.team-inbox .inbox-compose { margin: 0 0 .8rem; padding: 1rem; border: 1px solid #dbe4e2; border-radius: 10px; }
+.team-inbox .inbox-msg.outgoing { margin-inline-start: clamp(.3rem, 3vw, 3rem); border-color: #cfdfda; background: #f2f8f5; }
+.team-inbox .inbox-msg.internal { background: #fcf8ed; border-color: #e2d6bb; }
+.team-inbox .inbox-msg header { justify-content: space-between; }
+.team-inbox .inbox-msg p { margin: .65rem 0 .25rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.team-inbox .inbox-compose { margin-top: 1.4rem; }
+.team-inbox .inbox-compose fieldset { min-width: 0; padding: 0; border: 0; }
+.team-inbox .inbox-compose textarea { box-sizing: border-box; width: 100%; resize: vertical; }
+.team-inbox .inbox-compose-actions { margin-block: .5rem; align-items: flex-end; }
+.team-inbox .inbox-compose-actions label { margin: 0; }
+.team-inbox .inbox-empty { display: grid; justify-items: center; padding: 3rem 1rem; color: #52666c; text-align: center; }
+.team-inbox .inbox-empty h2 { margin: .75rem 0 .25rem; color: #243e43; }
+.team-inbox .inbox-empty p { margin: 0; }
+@media(max-width:52rem) {
+  .portable-contacts > .team-inbox { margin: .6rem; }
+  .team-inbox .inbox-layout { grid-template-columns: 1fr; }
+  .team-inbox .inbox-details { grid-row: 1; }
+  .team-inbox .inbox-list > li { grid-template-columns: auto minmax(0, 1fr); overflow-wrap: anywhere; }
+  .team-inbox .inbox-claim-open { justify-self: start; }
+  .team-inbox .inbox-list-meta { grid-column: 2; text-align: left; }
+}
+.team-inbox .inbox-review { padding: 1rem; margin: 0 0 1.2rem; background: #fffaec; border: 1px solid #e1cfa4; border-radius: 8px; }
+.team-inbox .inbox-review blockquote { max-height: 10rem; overflow: auto; margin: .6rem 0; padding-inline-start: .75rem; border-inline-start: 2px solid #d4c190; white-space: pre-wrap; }
+.team-inbox .inbox-library { margin: 0 0 1rem; }
+.team-inbox .inbox-library > div { max-width: 38rem; padding: .75rem 0; }
+.team-inbox .inbox-library fieldset { margin: 0; padding: 0; border: 0; }
+.team-inbox .inbox-library textarea { width: 100%; box-sizing: border-box; }
+.team-inbox .inbox-library blockquote { margin-inline: 0; white-space: pre-wrap; }
+
+.team-inbox .inbox-queue-filters { display:flex; flex-wrap:wrap; align-items:end; gap:.65rem 1rem; padding:.8rem 0; border:0; }
+.inbox-queue-filters label { min-width:0; max-width:100%; }
+.inbox-queue-filters input { box-sizing:border-box; width:100%; }
+.inbox-queue-filters a { align-self:center; }
+
+.team-inbox .inbox-pages { display:flex; gap:1rem; }
+
+.team-inbox .inbox-assign { margin-block: .7rem; }
+.team-inbox .inbox-assign summary { cursor: pointer; }
+.team-inbox .inbox-assign form { display: grid; gap: .5rem; margin-top: .5rem; }
+.team-inbox .inbox-assign :is(select,textarea) { width: 100%; box-sizing: border-box; }
+
+.inbox-msg .inbox-response-ticket { margin-top:.6rem; }
+.inbox-response-ticket fieldset { min-width:0; }
+.inbox-response-ticket select, .inbox-response-ticket input { box-sizing:border-box; max-width:100%; }
+.inbox-msg > .inbox-delivery { display:block; margin-bottom:.35rem; }
+
+.team-inbox .inbox-note { margin-block: .8rem; }
+.team-inbox .inbox-note form { margin-top: .5rem; padding: .85rem; background: #fcf8ed; border: 1px solid #e2d6bb; border-radius: 8px; }
+.team-inbox .inbox-note textarea { display: block; box-sizing: border-box; width: 100%; resize: vertical; }
+
+.team-inbox .inbox-ticket-tags { margin-block: .6rem; }
+.team-inbox .inbox-ticket-tags textarea { display: block; width: 100%; box-sizing: border-box; margin-block: .35rem; resize: vertical; }
+
+.team-inbox .inbox-reply-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; margin: .5rem 0; padding-inline-start: .75rem; border-inline-start: 2px solid #bdcfcb; }

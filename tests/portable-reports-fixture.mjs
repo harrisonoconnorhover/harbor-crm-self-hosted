@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {verifyRelatedCompanyReports} from './portable-related-company-report-fixture.mjs';
 import {randomUUID} from 'node:crypto';
 
 const path='/api/reporting';
@@ -75,6 +76,8 @@ async function verifyReportCatalog({request,origin,headers,other,sql,workspaceId
 export async function verifyPortableReports({request,origin,headers,other,sql,workspaceId}){
   const resetBudgets=()=>sql`DELETE FROM portable_request_budgets WHERE scope IN ('api_read','api_write') AND subject IN
     (SELECT id FROM login_identities WHERE email IN ('owner@example.test','other@example.test'))`;
+  await resetBudgets();
+  await verifyRelatedCompanyReports({request,origin,headers,other,sql});
   await resetBudgets();
   const get=(query='',auth=headers)=>request(path+query,{headers:auth});
   const post=(data,auth=headers,query='',source=origin)=>request(path+query,{method:'POST',

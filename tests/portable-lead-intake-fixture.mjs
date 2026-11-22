@@ -245,9 +245,9 @@ export async function verifyPortableIntake({request,origin,headers,other,sql,sha
     assert.doesNotMatch(html,/<h3>Older 100AA held inquiry<\/h3>/);
     assert.match(html,/<input (?=[^>]*name="inquirySearch")(?=[^>]*value="100%_ HeLD")/);
     const nextLink=html.match(/href="([^"]+)"[^>]*>Older inquiries<\/a>/)?.[1]?.replaceAll('&amp;','&');
-    assert.equal(nextLink,reviewPage+'&'+byName+'&'+cursor);
+    assert.equal(nextLink,reviewPage+'&'+byName+'&'+cursor+'#form-inquiries');
     const latestLink=html.match(/href="([^"]+)"[^>]*>Latest inquiries<\/a>/)?.[1]?.replaceAll('&amp;','&');
-    assert.equal(latestLink,reviewPage+'&'+byName);
+    assert.equal(latestLink,reviewPage+'&'+byName+'#form-inquiries');
     const lastPage=await get(nextLink,headers);
     assert.equal(lastPage.status,200);
     assert.equal((await lastPage.text()).match(/<h3>Older 100%_ held inquiry<\/h3>/g)?.length,1);

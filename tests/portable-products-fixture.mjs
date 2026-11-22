@@ -80,7 +80,7 @@ export async function verifyPortableProducts({request,origin,headers,other,shari
   assert.ok(!filteredIds.includes(ids[0]));
   const filteredHtml=await (await read('/products?'+oneTime)).text();
   assert.match(filteredHtml,/name="billingFrequency"[^>]*>[\s\S]*?<option value="one_time" selected="">One-time<\/option>/);
-  assert.match(filteredHtml,/href="\/products\?[^"]*billingFrequency=one_time&amp;page=1">Next products<\/a>/);
+  assert.match(filteredHtml,/href="\/products\?[^"]*billingFrequency=one_time&amp;after=[^"]+">Next products<\/a>/);
   const listPage='/products?'+oneTime+'&page=1';
   const selectedProduct=listPage+'&id='+filteredTwo.items[0].id;
   assert.ok((await (await read(listPage)).text()).includes('href="'+selectedProduct.replaceAll('&','&amp;')+'"'));

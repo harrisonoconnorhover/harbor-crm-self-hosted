@@ -1,3 +1,4 @@
+import type {RecordAccessActor} from '../db/postgres/record-access-store';
 import {listPortableDashboards,readDashboardRecords,readPortableDashboard,writePortableDashboard} from '../db/postgres/portable-dashboard-store';
 import {portableDashboardRead,portableDashboardWrite} from '../lib/portable-dashboards';
 import type {portableDb} from './portable-db';
@@ -10,13 +11,14 @@ const errors={
   report_missing:{message:'One or more saved reports are unavailable in this workspace.',status:404},
 };
 
-export async function dashboardRead(db:Db,actorId:string,query:Record<string,string>){
+export async function dashboardRead(db:Db,actor:RecordAccessActor,query:Record<string,string>,includeBody:boolean){
+  const actorId=actor.userId;
   const input=portableDashboardRead.safeParse(query);
   if(!input.success)return json({error:'Invalid dashboard query.'},400);
   const queryData=input.data;
   const result=queryData.view==='dashboards'?await listPortableDashboards(db,actorId,queryData):
-    queryData.view==='dashboardRecords'?await readDashboardRecords(db,actorId,queryData):
-    await readPortableDashboard(db,actorId,queryData.id,queryData.workspaceId);
+    queryData.view==='dashboardRecords'?await readDashboardRecords(db,actor,queryData,includeBody):
+    await readPortableDashboard(db,actorId,queryData.id,queryData.workspaceId,queryData);
   return result?json(result):json({error:errors.missing.message},errors.missing.status);
 }
 

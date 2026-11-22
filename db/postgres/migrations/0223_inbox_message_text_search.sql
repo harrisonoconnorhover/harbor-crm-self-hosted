@@ -1,0 +1,1 @@
+CREATE INDEX "inbox_message_body_search" ON "portable_inbox_messages" USING gin (to_tsvector('simple'::regconfig, "body"));

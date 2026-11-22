@@ -182,7 +182,7 @@ export async function verifyPortableLeadOwnership({request,origin,headers,other,
   const upgraded=await read({id:legacy,view:'history'});
   assert.deepEqual(upgraded.entries.map(entry=>[entry.revision,entry.previous?.assigneeId,entry.data.assigneeId]),[[2,null,ownerRow.id],[1,undefined,null]]);
 
-  // Lists show the assignee; conversion keeps it on the Lead and doesn't copy it to the Deal.
+  // Lists show the assignee. Converting an assigned lead gives the deal the same owner.
   const list=await (await request('/?'+new URLSearchParams({kind:'leads',search:marker}),{headers})).text();
   assert.match(list,/<th>Assignee<\/th>/);
   assert.match(list,/>Unassigned</);
@@ -204,5 +204,5 @@ export async function verifyPortableLeadOwnership({request,origin,headers,other,
   const after=await read({id:legacy});
   assert.deepEqual([after.data.leadStage,after.dealId,after.assigneeId],['Qualified',dealId,ownerRow.id]);
   const [deal]=await sql`SELECT data FROM deals WHERE workspace_id=${workspaceId} AND id=${dealId}`;
-  assert.equal(deal.data.recordOwner,undefined);
+  assert.deepEqual(deal.data.recordOwner,{workspaceId,userId:ownerRow.id,label:assigned.assigneeLabel});
 }

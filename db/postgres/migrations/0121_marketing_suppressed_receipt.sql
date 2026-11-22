@@ -1,0 +1,2 @@
+ALTER TABLE "portable_marketing_recipients" DROP CONSTRAINT "portable_marketing_recipient_state";--> statement-breakpoint
+ALTER TABLE "portable_marketing_recipients" ADD CONSTRAINT "portable_marketing_recipient_state" CHECK ("portable_marketing_recipients"."state" IN ('queued','sending','accepted','delivered','retry','uncertain','failed','skipped','suppressed','bounced','complained'));

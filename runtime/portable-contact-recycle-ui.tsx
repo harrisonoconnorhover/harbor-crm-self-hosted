@@ -1,16 +1,20 @@
 'use client';
 
+import {WorkspaceDate} from './portable-workspace-format';
 import {useEffect,useRef,useState} from 'react';
+import {PortableCrmHeader} from './portable-crm-header';
 import {useRouter} from 'next/navigation';
 import Link from 'next/link';
+import {jobDetailsHref} from '../lib/portable-job-labels';
+import {portableArchiveKind} from '../lib/portable-contact-archive';
 import type {PortableArchivedRecord,PortableArchiveInput,PortableArchiveKind,PortableArchiveReceipt} from '../lib/portable-contact-archive';
 import './portable-contacts.css';
 
 type Page={records:PortableArchivedRecord[];next:string|null};
 const api='/api/recycle-bin';
 export const portableRecycleBinPath='/?view=recycle-bin';
-const recordLabels={contacts:'contact',companies:'company',deals:'deal',tasks:'task'} satisfies Record<PortableArchiveKind,string>;
-const listLabels={contacts:'Contacts',companies:'Companies',deals:'Deals',tasks:'Tasks'} satisfies Record<PortableArchiveKind,string>;
+const recordLabels={contacts:'contact',companies:'company',deals:'deal',tasks:'task',leads:'lead',tickets:'ticket'} satisfies Record<PortableArchiveKind,string>;
+const listLabels={contacts:'Contacts',companies:'Companies',deals:'Deals',tasks:'Tasks',leads:'Leads',tickets:'Tickets'} satisfies Record<PortableArchiveKind,string>;
 const kindQuery=(kind:PortableArchiveKind)=>kind==='contacts'?'':'&kind='+kind;
 export type PortableRecycleScope={workspaceId:string;grantId:string};
 // The page URL names only the workspace; the API also needs the editor's grant.
@@ -28,6 +32,7 @@ export function PortableRecycleAction({action,id,revision,name,kind='contacts',r
   const [confirming,setConfirming]=useState(false);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
+  const [blockingJob,setBlockingJob]=useState<string>();
   const attempt=useRef<PortableArchiveInput|undefined>(undefined);
   const sending=useRef(false);
   const archive=action==='archive';
@@ -41,11 +46,13 @@ export function PortableRecycleAction({action,id,revision,name,kind='contacts',r
     setBusy(true);
     onBusy?.(true);
     setError('');
+    setBlockingJob(undefined);
     try{
       const response=await fetch(apiPath(scope),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)});
-      const result=await response.json() as {receipt?:PortableArchiveReceipt;error?:string}|null;
+      const result=await response.json() as {receipt?:PortableArchiveReceipt;error?:string;blockingJobId?:string}|null;
       if(!response.ok&&result?.error){
         setError(result.error);
+        setBlockingJob(result.blockingJobId);
         return;
       }
       if(!response.ok||result?.receipt?.id!==request.id||result.receipt.action!==request.action||
@@ -74,11 +81,11 @@ export function PortableRecycleAction({action,id,revision,name,kind='contacts',r
       {busy?(archive?'Archiving…':'Restoring…'):error?'Retry '+action:archive?'Confirm archive':label}
     </button>{' '}
     {archive&&<button type="button" disabled={busy} onClick={()=>{setConfirming(false);setError('');}}>Keep editing</button>}
-    {error&&<p role="alert">{error}</p>}
+    {error&&<p role="alert">{error}{blockingJob&&<> <a href={jobDetailsHref(blockingJob)}>Review blocking job</a></>}</p>}
   </div>;
 }
 
-export function PortableRecycleBin({after,email,kind,scope}:{after?:string;email:string;kind:PortableArchiveKind;scope?:PortableRecycleScope}){
+export function PortableRecycleBin({after,email,kind,scope,canRestore=true}:{after?:string;email:string;kind:PortableArchiveKind;scope?:PortableRecycleScope;canRestore?:boolean}){
   const router=useRouter();
   const contacts=kind==='contacts',detail=kind==='contacts'||kind==='companies';
   const workspaceId=scope?.workspaceId,binPath=portableRecycleBinLink(kind,workspaceId);
@@ -107,26 +114,25 @@ export function PortableRecycleBin({after,email,kind,scope}:{after?:string;email
   },[after,retry,kind,contacts,scope?.workspaceId,scope?.grantId]);
 
   return <main className="portable-contacts">
-    <header><span>⚓ Harbor</span><nav aria-label="CRM records"><Link href={home({})}>Contacts</Link> <Link href={home({kind:'tasks'})}>Tasks</Link>
-      <Link href={binPath} aria-current="page">Recycle Bin</Link></nav><span>{email} · <a href="/auth/sign-out">Sign out</a></span></header>
+    <PortableCrmHeader email={email} page="recycle-bin" workspaceId={workspaceId} recycleHref={binPath}/>
     <section aria-labelledby="portable-recycle-title">
       <h1 id="portable-recycle-title">Recycle Bin</h1>
       <nav aria-label="Archived record types">
-        {(['contacts','companies','deals','tasks'] as const).map(option=><Link key={option} href={portableRecycleBinLink(option,workspaceId)}
+        {portableArchiveKind.options.map(option=><Link key={option} href={portableRecycleBinLink(option,workspaceId)}
           aria-current={kind===option?'page':undefined}>{listLabels[option]}</Link>)}
       </nav>
-      <p>Restore an archived {recordLabels[kind]} to return it to {workspaceId?'the shared':'your'} {listLabels[kind]} list.</p>
+      {canRestore&&<p>Restore an archived {recordLabels[kind]} to return it to {workspaceId?'the shared':'your'} {listLabels[kind]} list.</p>}
       {error?<><p role="alert">{error}</p><button type="button" onClick={()=>{setError('');setRetry(value=>value+1);}}>Retry loading</button></>:
         page?<>
           {page.records.length?<div className="portable-contacts-table"><table>
-            <thead><tr><th scope="col">Name</th>{detail&&<th scope="col">{contacts?'Email':'Domain'}</th>}<th scope="col">Archived</th><th scope="col">Archived by</th><th scope="col">Actions</th></tr></thead>
+            <thead><tr><th scope="col">Name</th>{detail&&<th scope="col">{contacts?'Email':'Domain'}</th>}<th scope="col">Archived</th><th scope="col">Archived by</th>{canRestore&&<th scope="col">Actions</th>}</tr></thead>
             <tbody>{page.records.map(record=><tr key={record.id}>
               <th scope="row">{record.name}</th>{detail&&<td>{(contacts?record.email:record.domain)||'—'}</td>}
-              <td><time dateTime={record.archivedAt}>{new Date(record.archivedAt).toLocaleDateString('en-US')}</time></td>
+              <td><time dateTime={record.archivedAt}><WorkspaceDate value={record.archivedAt} day>{new Date(record.archivedAt).toLocaleDateString('en-US')}</WorkspaceDate></time></td>
               <td>{record.archivedBy??'Unknown'}</td>
-              <td><PortableRecycleAction key={record.revision} action="restore" kind={kind} id={record.id} revision={record.revision}
+              {canRestore&&<td><PortableRecycleAction key={record.revision} action="restore" kind={kind} id={record.id} revision={record.revision}
                 name={record.name} scope={scope} disabled={!!busyId&&busyId!==record.id} onBusy={busy=>setBusyId(busy?record.id:undefined)}
-                onDone={id=>router.replace(home(contacts?{contact:id}:{kind,record:id}))}/></td>
+                onDone={id=>router.replace(kind==='tickets'?'/tickets?'+new URLSearchParams({id,...(workspaceId?{workspaceId}:{})}):home(contacts?{contact:id}:{kind,record:id}))}/></td>}
             </tr>)}</tbody>
           </table></div>:<p>{'No archived '+kind+(after?' on this page.':'.')}</p>}
           {(after||page.next)&&<nav aria-label="Recycle Bin pages">

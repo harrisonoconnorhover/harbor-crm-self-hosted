@@ -8,8 +8,14 @@ import {portableManualBatchRead,portableManualWorkflowBatch,portableManualWorkfl
 import {portableApiIdentity} from './portable-api-identity';
 import {portableWorkflowGmailOwner} from './portable-gmail-config';
 import {portableCodeAvailable} from './portable-code-config';
+import {configuredWebhookDestinations} from './portable-webhook-config';
 import {portableDb} from './portable-db';
 
+const commandByteLimit=32_000;
+// Six outcomes with five Tasks each can carry 2,000 note and 160 name characters per Task.
+// Allow six-byte JSON escapes as well as the path conditions, names, IDs and structure.
+const conditionalSaveByteLimit=512*1024;
+const tooLarge=()=>json({error:'Workflow settings are too large.'},413);
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'cache-control':'private, no-store'}});
 
 async function route(request:Request){
@@ -31,9 +37,12 @@ async function route(request:Request){
       return json({workflows,...history});
     }
     if(params.size)return json({error:'Only the workspace owner can change these workflows.'},403);
-    const text=await readBoundedRequestText(request,32_000);
-    if(text===null)return json({error:'Workflow settings are too large.'},413);
+    const text=await readBoundedRequestText(request,conditionalSaveByteLimit);
+    if(text===null)return tooLarge();
     const raw=JSON.parse(text);
+    if((raw?.action!=='save'||raw.definition?.actionKind!=='conditional_paths')&&Buffer.byteLength(text)>commandByteLimit){
+      return tooLarge();
+    }
     if(raw?.action==='reviewQueueFullRun'){
       const {id}=portableWorkflowCapacityReview.parse(raw);
       const receipt=await reviewWorkflowCapacitySkip(db,user.userId,id);
@@ -47,7 +56,7 @@ async function route(request:Request){
       const {run,created}=await admitManualWorkflowRun(db,user.userId,portableManualWorkflowRun.parse(raw),portableCodeAvailable());
       return json({run},created?201:200);
     }
-    await managePortableWorkflow(db,user.userId,portableWorkflowAction.parse(raw),portableWorkflowGmailOwner()===user.email.toLowerCase(),portableCodeAvailable());
+    await managePortableWorkflow(db,user.userId,portableWorkflowAction.parse(raw),portableWorkflowGmailOwner()===user.email.toLowerCase(),portableCodeAvailable(),configuredWebhookDestinations);
     return json({ok:true});
   }catch(error){
     if(error instanceof ApiError)return json({error:error.message},error.status);

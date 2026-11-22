@@ -57,6 +57,9 @@
 .portable-record-bulk > button { margin-block-start: 8px; }
 
 .portable-contacts-table { overflow-x: auto; }
+.ticket-deadline { margin-top:.2rem; font-size:.875rem; }
+.ticket-deadline time { white-space:nowrap; }
+.ticket-queue-assignment { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; margin-top:.3rem; font-size:.875rem; }
 .portable-job-gmail-search { display: block; max-width: 24rem; overflow-wrap: anywhere; }
 .portable-contacts table { width: 100%; border-collapse: collapse; text-align: left; }
 .portable-contacts th, .portable-contacts td { padding: 8px; border-block-end: 1px solid #dde5e4; }
@@ -65,15 +68,15 @@
 .portable-contacts .portable-record-name:hover { text-decoration: underline; }
 .portable-contacts nav { display: flex; gap: 16px; margin-block-start: 12px; }
 .portable-contacts > header > nav { flex-wrap: wrap; }
-.portable-contacts nav:is([aria-label="Task filters"], [aria-label="Queue status"], [aria-label="Record associations"]) { flex-wrap: wrap; }
-.portable-contacts nav[aria-label="Queue status"] a[aria-current="page"] { color: #075e63; font-weight: 600; }
+.portable-contacts nav:is([aria-label="Task filters"], [aria-label="First-response queues"], [aria-label="Queue status"], [aria-label="Record associations"]) { flex-wrap: wrap; }
+.portable-contacts nav:is([aria-label="Queue status"], [aria-label="First-response queues"]) a[aria-current="page"] { color: #075e63; font-weight: 600; }
 .portable-job-overview { margin-block: 12px; }
 .portable-job-overview h2 { font-size: 1rem; margin-block-end: 6px; }
 .portable-job-overview ul { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
 .portable-job-overview li { flex: 1 1 14rem; border: 1px solid #dde5e4; border-radius: 6px; padding: 8px 12px; }
 .portable-job-overview a { color: #075e63; font-weight: 600; }
 .portable-job-overview li p { margin: 2px 0 0; }
-.portable-contacts .portable-job-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; padding: 0; border: 0; }
+.portable-contacts :is(.portable-job-filter, .portable-call-search) { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; padding: 0; border: 0; }
 .portable-inquiry-filters a[aria-current="page"] { color: #075e63; font-weight: 600; }
 .portable-deals .portable-contacts-heading { margin-block-end: 12px; }
 .portable-contacts .portable-deals > nav[aria-label="Deal view"] {
@@ -251,3 +254,17 @@
 .portable-global-search a.search-result:hover { background: #f4f7f6; }
 
 .portable-job-attempt-time{display:block;color:var(--muted,#526a7a);white-space:nowrap}
+
+.portable-contacts td .ticket-tags{display:block;margin-top:.3rem}
+.portable-contacts .ticket-tag{display:inline-block;margin:0 .35rem .25rem 0;padding:.12rem .5rem;border:1px solid #c4d9d6;border-radius:1rem;color:#155b59;background:#eef6f4;text-decoration:none;overflow-wrap:anywhere}
+.portable-contacts .ticket-tag:hover,.portable-contacts .ticket-tag:focus-visible{text-decoration:underline}
+
+.portable-call-list { list-style:none; padding:0; }
+.portable-call-list li { display:grid; grid-template-columns:1fr auto; gap:4px 16px; padding:12px 0; border-bottom:1px solid #dde5e4; }
+.portable-call-list li > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
+.portable-call-list a { color:#075e63; font-weight:600; }
+.portable-call-list :is(time,span) { color:#516568; font-size:.84rem; }
+.portable-call-list p { grid-column:1/-1; margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.portable-call-list li > div { min-width:0; overflow-wrap:anywhere; }
+.portable-call-list + nav { display:flex; gap:16px; }
+@media(max-width:35rem) { .portable-call-list li { grid-template-columns:1fr; } }

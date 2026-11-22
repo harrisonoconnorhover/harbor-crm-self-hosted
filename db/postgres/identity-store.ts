@@ -1,4 +1,4 @@
-import {and,asc,eq,gt,inArray,isNotNull,lte,sql} from 'drizzle-orm';
+import {and,asc,eq,gt,inArray,isNull,lte,sql} from 'drizzle-orm';
 import {drizzle,type PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type {GoogleIdentityStore} from '../../lib/identity-service';
@@ -17,52 +17,53 @@ export async function lockPortableLoginSession(tx:Transaction,actor:PostgresSess
 }
 
 type PortableProviderPolicy={
-  provider:'google'|'microsoft';
-  reservedForMicrosoft:(email:string)=>boolean;
-  activeSession:(microsoftSubject:string|null,email:string)=>boolean;
+  provider?:'google'|'microsoft'|'saml'|'oidc';
+  reservedForOtherProvider:(email:string)=>boolean;
+  activeSession:(identity:{oidcSubject:string|null;microsoftSubject:string|null;samlSubject:string|null;oidcDirectoryIssuer:string|null;samlDirectoryIssuer:string|null;email:string;directoryAuthority:string|null})=>boolean;
 };
 export function postgresIdentityStore(db:PostgresJsDatabase,policy?:PortableProviderPolicy):GoogleIdentityStore{
   return {
     async recordIdentity(identity,now){
-      const microsoft=policy?.provider==='microsoft';
-      const subject=microsoft?loginIdentities.microsoftSubject:loginIdentities.googleSubject;
+      const provider=policy?.provider??'google';
+      const subjectKey=({oidc:'oidcSubject',google:'googleSubject',microsoft:'microsoftSubject',saml:'samlSubject'} as const)[provider];
+      const subject=loginIdentities[subjectKey];
       return db.transaction(async tx=>{
         // Two web processes may receive callbacks for the same address concurrently.
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${identity.email},0))`);
-        const conflict=microsoft?sql`${loginIdentities.microsoftSubject} IS DISTINCT FROM ${identity.subject}`
-          :isNotNull(loginIdentities.microsoftSubject);
+        const conflict=provider==='google'?isNull(loginIdentities.googleSubject):sql`${subject} IS DISTINCT FROM ${identity.subject}`;
         const [occupant]=await tx.select({id:loginIdentities.id}).from(loginIdentities)
           .where(and(eq(loginIdentities.email,identity.email),conflict)).limit(1);
         if(occupant)throw Error('This Harbor address already belongs to another identity.',{cause:'account-conflict'});
-        if(!microsoft&&policy?.reservedForMicrosoft(identity.email)){
+        if(policy?.reservedForOtherProvider(identity.email)){
           const [incumbent]=await tx.select({id:loginIdentities.id}).from(loginIdentities)
-            .where(and(eq(loginIdentities.email,identity.email),eq(loginIdentities.googleSubject,identity.subject))).limit(1);
-          if(!incumbent)throw Error('This address is reserved for a pinned Microsoft account.',{cause:'account-conflict'});
+            .where(and(eq(loginIdentities.email,identity.email),eq(subject,identity.subject))).limit(1);
+          if(!incumbent)throw Error('This address is reserved for another sign-in provider.',{cause:'account-conflict'});
         }
         const [account]=await tx.insert(loginIdentities).values({
-          id:crypto.randomUUID(),...(microsoft?{microsoftSubject:identity.subject}:{googleSubject:identity.subject}),
+          id:crypto.randomUUID(),[subjectKey]:identity.subject,
           email:identity.email,fullName:identity.fullName,createdAt:now,updatedAt:now,
         }).onConflictDoUpdate({
           target:subject,set:{email:identity.email,fullName:identity.fullName,updatedAt:now},
-          setWhere:microsoft?eq(loginIdentities.email,identity.email):undefined,
+          setWhere:provider==='google'?undefined:eq(loginIdentities.email,identity.email),
         }).returning({id:loginIdentities.id});
-        if(!account)throw Error('The stored Microsoft account uses a different Harbor address.',{cause:'account-conflict'});
+        if(!account)throw Error('The stored sign-in account uses a different Harbor address.',{cause:'account-conflict'});
         return account.id;
       });
     },
-    async saveSession(session){
+    async saveSession(session,priorSessionHash){
       await db.transaction(async tx=>{
         await tx.insert(loginSessions).values(session);
+        if(priorSessionHash)await tx.delete(loginSessions).where(eq(loginSessions.tokenHash,priorSessionHash));
         const expired=tx.select({tokenHash:loginSessions.tokenHash}).from(loginSessions)
           .where(lte(loginSessions.expiresAt,session.createdAt)).orderBy(asc(loginSessions.expiresAt)).limit(100);
         await tx.delete(loginSessions).where(inArray(loginSessions.tokenHash,expired));
       });
     },
     async findSession(tokenHash,now){
-      const [identity]=await db.select({userId:loginIdentities.id,email:loginIdentities.email,fullName:loginIdentities.fullName,microsoftSubject:loginIdentities.microsoftSubject})
+      const [identity]=await db.select({userId:loginIdentities.id,email:loginIdentities.email,fullName:loginIdentities.fullName,microsoftSubject:loginIdentities.microsoftSubject,oidcSubject:loginIdentities.oidcSubject,samlSubject:loginIdentities.samlSubject,oidcDirectoryIssuer:loginIdentities.oidcDirectoryIssuer,samlDirectoryIssuer:loginIdentities.samlDirectoryIssuer,directoryAuthority:loginIdentities.directoryAuthority})
         .from(loginSessions).innerJoin(loginIdentities,eq(loginIdentities.id,loginSessions.userId))
         .where(and(eq(loginSessions.tokenHash,tokenHash),gt(loginSessions.expiresAt,now)));
-      if(!identity||!(policy?policy.activeSession(identity.microsoftSubject,identity.email):!identity.microsoftSubject))return;
+      if(!identity||!(policy?policy.activeSession(identity):!identity.microsoftSubject&&!identity.samlSubject&&!identity.oidcSubject))return;
       return {userId:identity.userId,email:identity.email,fullName:identity.fullName};
     },
     async revokeSession(tokenHash,allDevices,now){

@@ -1,3 +1,5 @@
+import {sharedToolAllowed} from '../db/postgres/shared-tool-permission';
+import {recordAccess,recordPreviewAccess} from '../db/postgres/record-access-store';
 import {changePortableDuplicateDismissal,readPortableDuplicates} from '../db/postgres/portable-duplicate-store';
 import {sharedWorkspaceGrant} from '../db/postgres/workspace-viewer-store';
 import {privateWorkspaces} from '../db/postgres/workspace-schema';
@@ -21,16 +23,25 @@ async function duplicates(request:Request){
     if(request.method!=='POST'){
       const query=portableDuplicateQuery.safeParse(Object.fromEntries(params));
       if(!query.success||params.size!==new Set(params.keys()).size)return json({error:'Choose valid duplicate-review filters.'},400);
-      let workspaceId:string|undefined;
-      if(query.data.workspaceId){
-        const grant=await sharedWorkspaceGrant(db,user.userId,query.data.workspaceId);
-        if(grant?.id!==query.data.grantId||grant.role!=='editor')return json({error:editorRequired},403);
-        workspaceId=query.data.workspaceId;
-      }else{
-        [{id:workspaceId}={id:undefined}]=await db.select({id:privateWorkspaces.id}).from(privateWorkspaces).where(eq(privateWorkspaces.ownerId,user.userId));
-      }
-      if(!workspaceId)return json({pairs:[],nextCursor:null,total:0,limited:false,recordsChecked:0});
-      return json(await readPortableDuplicates(db,workspaceId,query.data));
+      return await db.transaction(async tx=>{
+        let workspaceId:string|undefined,scopedEditor:string|undefined;
+        if(query.data.workspaceId){
+          const grant=await sharedWorkspaceGrant(tx,user.userId,query.data.workspaceId,true);
+          if(grant?.id!==query.data.grantId||grant.role!=='editor'||!await sharedToolAllowed(tx,user.userId,query.data.workspaceId,'duplicates'))return json({error:editorRequired},403);
+          workspaceId=query.data.workspaceId;
+          scopedEditor=user.userId;
+        }else{
+          [{id:workspaceId}={id:undefined}]=await tx.select({id:privateWorkspaces.id}).from(privateWorkspaces).where(eq(privateWorkspaces.ownerId,user.userId));
+        }
+        if(!workspaceId)return json({pairs:[],nextCursor:null,total:0,limited:false,recordsChecked:0});
+        const page=await readPortableDuplicates(tx,workspaceId,query.data,scopedEditor);
+        if(request.method!=='HEAD'&&page.pairs.length){
+          const records=page.pairs.flatMap(({left,right})=>[left,right]);
+          await recordAccess(tx,user,query.data.kind,'duplicates',[...new Set(records.map(record=>record.id))],workspaceId);
+          await recordPreviewAccess(tx,user,'related',records.flatMap(record=>record.companyId?[{kind:'companies',id:record.companyId}]:[]),workspaceId);
+        }
+        return json(page);
+      },{isolationLevel:'repeatable read'});
     }
     let shared:SharedRecordWriteScope|undefined;
     if(params.size){
@@ -49,4 +60,4 @@ async function duplicates(request:Request){
   }
 }
 
-export {duplicates as GET,duplicates as POST};
+export {duplicates as GET,duplicates as HEAD,duplicates as POST};

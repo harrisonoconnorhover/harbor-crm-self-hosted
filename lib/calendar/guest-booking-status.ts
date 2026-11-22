@@ -24,7 +24,7 @@ export async function openGuestStatusReceipt(config:StatusConfig,receipt:string,
   }catch{return null;}
 }
 
-export type GuestBookingStatus={state:'pending'|'confirmed'|'checking'|'cancelled'|'closed';start?:string;end?:string};
+export type GuestBookingStatus={state:'reserved'|'pending'|'confirmed'|'checking'|'cancelled'|'closed';start?:string;end?:string;calendar?:{id:string;title:string}};
 
 export function guestBookingStatus(guestStart:string,guestEnd:string,open:boolean,
   meeting:{state:string;start:string;end:string}|null,now=Date.now()):GuestBookingStatus{

@@ -106,3 +106,17 @@ test('initial workspace reads stop at their own deadline or when the view closes
   await assert.rejects(leaving,{name:'AbortError'});
   assert.equal(deadlines[1].signal.aborted,false);
 });
+
+test('acceptance confirms a workspace outside the account overview without repeating the write',async()=>{
+  for(const [code,expected] of [[200,'accepted'],[404,'denied'],[503,'unconfirmed']]){
+    const methods=[];
+    const result=await acceptReviewedWorkspaceInvitation(async(path,init)=>{
+      methods.push(init.method??'GET');
+      if(init.method==='POST')return Response.json({shared:[{id:'another'}],sharedNext:'more'});
+      assert.equal(path,'/api/workspaces?joined=1&current=reviewed');
+      return Response.json({current:{id:'reviewed'}},{status:code});
+    },'invite','reviewed',false);
+    assert.equal(result.status,expected);
+    assert.deepEqual(methods,['POST','GET']);
+  }
+});

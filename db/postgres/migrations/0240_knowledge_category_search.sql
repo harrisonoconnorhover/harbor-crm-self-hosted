@@ -1,0 +1,1 @@
+CREATE INDEX "portable_knowledge_category_search" ON "portable_knowledge_categories" USING gin (("name_key" COLLATE "C") public.gin_trgm_ops);

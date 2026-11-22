@@ -1,0 +1,2 @@
+ALTER TABLE "portable_sales_sequence_activations" ADD COLUMN "team_booking_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_sales_sequence_activations" ADD CONSTRAINT "sales_activation_booking_fk" FOREIGN KEY ("workspace_id","team_booking_id") REFERENCES "public"."portable_team_bookings"("workspace_id","id") ON DELETE no action ON UPDATE no action;

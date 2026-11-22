@@ -2,6 +2,7 @@ import {z} from 'zod';
 import {schemas} from './crm';
 import {validTimeZone} from './email/schedule';
 import {portableRecordKind,recordSearchLimit,writeSchema,type PortableRecordKind} from './portable-records';
+import {portableOutreachWrite} from './portable-contact-activities';
 import {NO_QUEUE} from './task-queues';
 import {extensionSchemas} from './standard-properties';
 import type {TaskDeadline} from './task-deadline';
@@ -10,13 +11,15 @@ import {reminderMinutes} from './portable-task-reminders';
 
 export const portableTaskStatuses=schemas.tasks.shape.status.removeDefault().options;
 export const portableTaskPriorities=schemas.tasks.shape.priority.removeDefault().options;
-export const portableTaskTypes=schemas.tasks.shape.taskType.removeDefault().options;
+export const portableTaskTypes=[...schemas.tasks.shape.taskType.removeDefault().options,'LinkedIn'] as const;
+export const taskOutreachKinds=['Call','Email','LinkedIn'] as const;
 export const portableTaskDateViews=['today','overdue','upcoming'] as const;
 export type PortableTaskDateView=(typeof portableTaskDateViews)[number];
 export const isPortableTaskDateView=(view?:string|null):view is PortableTaskDateView=>
   portableTaskDateViews.some(item=>item===view);
 export const portableTaskFields=z.object({
-  ...schemas.tasks.pick({name:true,taskType:true,dueTime:true,dueTimeZone:true,dueTimeOccurrence:true,status:true,priority:true}).shape,
+  ...schemas.tasks.pick({name:true,dueTime:true,dueTimeZone:true,dueTimeOccurrence:true,status:true,priority:true}).shape,
+  taskType:z.enum(portableTaskTypes).default('To-do'),
   dueDate:schemas.tasks.shape.dueDate.removeDefault().optional(),
   notes:extensionSchemas.tasks.notes as z.ZodOptional<z.ZodString>,
   repeat:taskRepeatSchema.nullable().optional(),
@@ -26,8 +29,13 @@ const uuid=z.string().guid("Invalid uuid");
 export const portableTaskWrite=writeSchema(z.object({action:z.literal('save'),kind:z.literal('tasks'),data:portableTaskFields,
   assigneeId:z.string().min(1).max(200).nullable().optional(),contactId:uuid.nullable().optional(),
   queueId:uuid.nullable().optional(),
+  outreach:z.object({contactId:uuid,kind:z.enum(taskOutreachKinds),summary:portableOutreachWrite.shape.summary,
+    aircall:z.object({callId:z.number().int().positive(),
+      occurredAt:portableOutreachWrite.shape.occurredAt}).strict().optional(),
+  }).strict().refine(value=>!value.aircall||value.kind==='Call').optional(),
   related:z.object({kind:portableRecordKind,id:uuid}).strict().nullable().optional(),
-})).refine(input=>input.related===undefined||input.contactId===undefined);
+})).refine(input=>input.related===undefined||input.contactId===undefined)
+  .refine(input=>!input.outreach||('id' in input&&input.data.status==='Completed'));
 export const taskLinkFields={contacts:'contactId',companies:'companyId',deals:'dealId'} as const;
 type TaskLinkField=(typeof taskLinkFields)[PortableRecordKind];
 export function taskLinkTarget(links:Partial<Record<TaskLinkField,string|null>>){
@@ -52,7 +60,7 @@ export const portableTaskRead=z.object({
   ((input.taskZone===undefined&&input.taskAssignee===undefined)||isPortableTaskDateView(input.taskView))&&
   !(input.id&&(input.after||input.search||input.status||input.taskPriority||input.taskType||input.taskView||input.queueId||taskLinkTarget(input))));
 export const portableTaskCompletionRead=z.object({
-  kind:z.literal('tasks'),completionHistoryFor:uuid,workspaceId:uuid.optional(),
+  kind:z.literal('tasks'),completionHistoryFor:uuid,recordKind:z.enum(['contacts','deals']).default('contacts'),workspaceId:uuid.optional(),
   limit:z.coerce.number().int().min(1).max(25).default(25),
   afterAt:z.string().datetime({precision:3}).refine(value=>!value.startsWith('0000-')).optional(),afterId:uuid.optional(),
   afterRevision:z.coerce.number().int().min(1).max(2147483647).optional(),
@@ -68,6 +76,10 @@ export type PortableTaskFields=z.output<typeof portableTaskFields>&Pick<TaskDead
 export type PortableTaskWrite=z.output<typeof portableTaskWrite>;
 export type PortableTaskQuery=z.output<typeof portableTaskRead>;
 export type PortableTaskRecord={
+  editable?:boolean;
+  inactiveSequenceTask?:boolean;
+  dialPhone?:string|null;
+  linkedInProfile?:string|null;
   id:string;revision:number;data:PortableTaskFields;assigneeId:string|null;assigneeLabel:string|null;
   contactId:string|null;contactName:string|null;companyId:string|null;companyName:string|null;
   dealId:string|null;dealName:string|null;queueId:string|null;completedAt:string|null;createdAt:string;updatedAt:string;

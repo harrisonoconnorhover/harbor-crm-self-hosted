@@ -1,5 +1,6 @@
 'use client';
 
+import {WorkspaceDate,WorkspaceNumber} from './portable-workspace-format';
 import {useRef,useState,type FormEvent} from 'react';
 import {useRouter} from 'next/navigation';
 import {Building2,CalendarDays} from 'lucide-react';
@@ -9,8 +10,9 @@ import type {DealRecord,PortableDealLane,PortableRecordQuery} from '../lib/porta
 export type DealBoardData={pipeline:DealPipeline;lanes:PortableDealLane[]};
 export type BlockedDealMove={stageId:string;missingFields:MissingDealStageField[];message:string};
 
-export function PortableDealBoard({board,filters,workspaceId,grantId,readOnly,onEdit}:{
-  board:DealBoardData;filters:Pick<PortableRecordQuery,'search'|'owner'|'closeMonth'>;workspaceId?:string;grantId?:string;readOnly:boolean;
+export function PortableDealBoard({board,filters,workspaceId,grantId,canEdit,onEdit,recordHref}:{
+  recordHref:(id:string)=>string;
+  board:DealBoardData;filters:Pick<PortableRecordQuery,'search'|'owner'|'closeMonth'>;workspaceId?:string;grantId?:string;canEdit:(card:DealRecord)=>boolean;
   onEdit:(record:DealRecord,move?:BlockedDealMove)=>void;
 }){
   const router=useRouter();
@@ -30,7 +32,7 @@ export function PortableDealBoard({board,filters,workspaceId,grantId,readOnly,on
   }
 
   async function move(card:DealRecord,stage:PipelineStage){
-    if(readOnly||moving.current||stageFor(card)===stage.id)return;
+    if(!canEdit(card)||moving.current||stageFor(card)===stage.id)return;
     moving.current=true;
     setPending(true);
     setStatus('');
@@ -67,7 +69,7 @@ export function PortableDealBoard({board,filters,workspaceId,grantId,readOnly,on
   }
 
   return <>
-    {!readOnly&&<p className="portable-deal-board-help">Drag deals between stages or use Move.</p>}
+    {lanes.some(lane=>lane.cards.some(canEdit))&&<p className="portable-deal-board-help">Drag deals between stages or use Move.</p>}
     <p className="portable-deal-board-status" role="status">{status}</p>
     {error&&<p role="alert">{error}{' '}
       {blockedMove?<button type="button" onClick={()=>{
@@ -93,22 +95,20 @@ export function PortableDealBoard({board,filters,workspaceId,grantId,readOnly,on
           </span>
         </header>
         {cards.length>0&&<ul>{cards.map(card=><li key={card.id} className="portable-deal-card"
-          draggable={!readOnly&&!pending}
+          draggable={canEdit(card)&&!pending}
           onDragStart={event=>{
+            if(!canEdit(card)){event.preventDefault();return;}
             event.dataTransfer.setData('text/plain',card.id);
             event.dataTransfer.effectAllowed='move';
             setDragged(card);
           }}
           onDragEnd={()=>setDragged(null)}>
-          {readOnly?<a className="portable-deal-card-title" href={'/?'+new URLSearchParams({
-            kind:'deals',record:card.id,...(workspaceId?{workspaceId}:{}),
-          })}>{card.data.name}</a>:<button type="button" className="portable-deal-card-title"
-            disabled={pending} onClick={()=>onEdit(card)}>{card.data.name}</button>}
-          <p className="portable-deal-card-amount">{card.data.amount.toLocaleString()}</p>
+          <a className="portable-deal-card-title" href={recordHref(card.id)}>{card.data.name}</a>
+          {card.data.amount!=null&&<p className="portable-deal-card-amount"><WorkspaceNumber kind="money" value={card.data.amount}>{card.data.amount.toLocaleString()}</WorkspaceNumber></p>}
           {card.companyName&&<p className="portable-deal-card-meta"><Building2 size={14} aria-hidden="true"/>{card.companyName}</p>}
           {card.data.closeDate&&<p className="portable-deal-card-meta"><CalendarDays size={14} aria-hidden="true"/>
-            <span>Closes <time dateTime={card.data.closeDate}>{card.data.closeDate}</time></span></p>}
-          {!readOnly&&<form onSubmit={event=>submit(event,card)}>
+            <span>Closes <time dateTime={card.data.closeDate}><WorkspaceDate day value={card.data.closeDate}>{card.data.closeDate}</WorkspaceDate></time></span></p>}
+          {canEdit(card)&&<form onSubmit={event=>submit(event,card)}>
             <select name="destination" aria-label={'Move '+card.data.name+' to stage'} disabled={pending}
               key={card.revision} defaultValue={stage.id}>
               {pipeline.stages.map(option=><option key={option.id} value={option.id}>{option.name}</option>)}

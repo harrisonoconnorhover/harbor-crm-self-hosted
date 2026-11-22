@@ -1,0 +1,4 @@
+ALTER TABLE "portable_ticket_first_responses" ADD COLUMN "inbox_reply_id" uuid;--> statement-breakpoint
+ALTER TABLE "portable_ticket_first_responses" ADD CONSTRAINT "portable_response_inbox_reply_fk" FOREIGN KEY ("workspace_id","inbox_reply_id") REFERENCES "public"."portable_inbox_messages"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "portable_response_inbox_reply" ON "portable_ticket_first_responses" USING btree ("workspace_id","inbox_reply_id") WHERE "portable_ticket_first_responses"."inbox_reply_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "portable_ticket_first_responses" ADD CONSTRAINT "portable_response_inbox_email" CHECK ("portable_ticket_first_responses"."inbox_reply_id" IS NULL OR ("portable_ticket_first_responses"."responded_at" IS NOT NULL AND "portable_ticket_first_responses"."channel"='Email'));

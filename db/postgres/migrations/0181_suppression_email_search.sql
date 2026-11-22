@@ -1,0 +1,1 @@
+CREATE INDEX "portable_suppression_email_search" ON "portable_email_suppressions" USING gin (((coalesce(lower("email"),'')) COLLATE "C") public.gin_trgm_ops) WITH (gin_pending_list_limit=256);

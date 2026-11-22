@@ -24,7 +24,7 @@ export type VerifiedGoogleIdentity=Awaited<ReturnType<typeof exchangeGoogleIdent
 export type LoginSession={tokenHash:string;userId:string;createdAt:number;expiresAt:number};
 export type GoogleIdentityStore={
   recordIdentity(identity:VerifiedGoogleIdentity,now:number):Promise<string>;
-  saveSession(session:LoginSession):Promise<void>;
+  saveSession(session:LoginSession,priorSessionHash?:string|null):Promise<void>;
   findSession(tokenHash:string,now:number):Promise<Omit<HarborIdentity,'displayName'>|undefined>;
   revokeSession(tokenHash:string,allDevices:boolean,now:number):Promise<void>;
 };
@@ -47,15 +47,15 @@ export function createGoogleIdentityService(environment:IdentityEnvironment,getS
     {provider:'google',authorizationUrl:googleLoginURL,exchange:exchangeGoogleIdentity},admitExchange,allowAdditional);
 }
 
-export function createOidcIdentityService<Config extends ReturnType<typeof loginConfig>>(
+export function createOidcIdentityService<Config extends ReturnType<typeof loginConfig>&{attemptSecret?:string}>(
   configure:()=>Config,getStore:()=>GoogleIdentityStore,
-  protocol:{provider:'google'|'microsoft';authorizationUrl:(config:Config,state:string,nonce:string,verifier:string)=>Promise<string>;
+  protocol:{provider:'google'|'microsoft'|'oidc';authorizationUrl:(config:Config,state:string,nonce:string,verifier:string)=>Promise<string>;
     exchange:(config:Config,code:string,verifier:string,nonce:string)=>Promise<VerifiedGoogleIdentity>},
   admitExchange?:(state:string)=>Promise<void>,allowAdditional?:AdditionalSignIn){
   async function beginLogin(returnTo:string){
     const config=configure(),state=randomSecret(),nonce=randomSecret(),verifier=randomSecret();
     const browser=await new EncryptJWT({state,nonce,verifier,returnTo:safeReturnPath(returnTo)})
-      .setProtectedHeader({alg:'dir',enc:'A256GCM'}).setAudience(config.origin).setIssuedAt().setExpirationTime('10m').encrypt(await attemptKey(config.clientSecret,protocol.provider));
+      .setProtectedHeader({alg:'dir',enc:'A256GCM'}).setAudience(config.origin).setIssuedAt().setExpirationTime('10m').encrypt(await attemptKey(config.attemptSecret??config.clientSecret,protocol.provider));
     return {url:await protocol.authorizationUrl(config,state,nonce,verifier),browser};
   }
 
@@ -64,7 +64,7 @@ export function createOidcIdentityService<Config extends ReturnType<typeof login
     let stage='attempt',returnTo:string|undefined;
     try{
       const config=configure(),now=Date.now();
-      const {payload}=await jwtDecrypt(browser,await attemptKey(config.clientSecret,protocol.provider),{audience:config.origin,keyManagementAlgorithms:['dir'],contentEncryptionAlgorithms:['A256GCM'],requiredClaims:['exp','iat'],maxTokenAge:'10m'});
+      const {payload}=await jwtDecrypt(browser,await attemptKey(config.attemptSecret??config.clientSecret,protocol.provider),{audience:config.origin,keyManagementAlgorithms:['dir'],contentEncryptionAlgorithms:['A256GCM'],requiredClaims:['exp','iat'],maxTokenAge:'10m'});
       const attempt=attemptClaims.parse(payload);
       if(attempt.state!==state)throw Error('This sign-in belongs to a different browser attempt.');
       returnTo=safeReturnPath(attempt.returnTo);
@@ -81,8 +81,7 @@ export function createOidcIdentityService<Config extends ReturnType<typeof login
       stage='account';
       const store=getStore(),userId=await store.recordIdentity(identity,now);
       stage='session';
-      const token=randomSecret();
-      await store.saveSession({tokenHash:await sha256(token),userId,createdAt:now,expiresAt:now+SESSION_SECONDS*1000});
+      const token=await issueLoginSession(store,userId,now);
       return {token,returnTo,userId};
     }catch(error){
       if(error instanceof GoogleLoginAdmissionError)throw error;
@@ -91,6 +90,17 @@ export function createOidcIdentityService<Config extends ReturnType<typeof login
     }
   }
 
+  return {beginLogin,finishLogin,...createIdentitySessions(configure,getStore,allowAdditional)};
+}
+
+export async function issueLoginSession(store:GoogleIdentityStore,userId:string,now:number,priorSessionHash?:string|null){
+  const token=randomSecret();
+  await store.saveSession({tokenHash:await sha256(token),userId,createdAt:now,expiresAt:now+SESSION_SECONDS*1000},priorSessionHash);
+  return token;
+}
+
+export function createIdentitySessions(configure:()=>{secure:boolean;allowedEmails:string[]},getStore:()=>GoogleIdentityStore,
+  allowAdditional?:AdditionalSignIn){
   function hashSessionCookie(headers:Headers,secure:boolean){
     const token=readCookie(headers,cookieName('session',secure));
     return token?sha256(token):null;
@@ -111,5 +121,5 @@ export function createOidcIdentityService<Config extends ReturnType<typeof login
     if(hash)await getStore().revokeSession(hash,allDevices,Date.now());
   }
 
-  return {beginLogin,finishLogin,sessionHash,sessionIdentity,revokeLogin};
+  return {sessionHash,sessionIdentity,revokeLogin};
 }

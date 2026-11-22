@@ -26,16 +26,19 @@ export function PortableDealFilterFields({pipelines,pipelineId,stage}:{
   </>;
 }
 
-export function PortableDealStage({pipelines,pipelineId,stage}:{
-  pipelines:DealPipeline[];pipelineId:string;stage?:string;
+export function PortableDealStage({pipelines,pipelineId,stage,stageEditable,existing}:{
+  pipelines:DealPipeline[];pipelineId:string;stage?:string;stageEditable:boolean;existing:boolean;
 }){
   const [selected,setSelected]=useState(pipelines.some(pipeline=>pipeline.id===pipelineId)?pipelineId:'default');
   const options=(pipelines.find(pipeline=>pipeline.id===selected)??pipelines[0]).stages;
+  const fixedStage=existing&&stage?stage:options[0].id;
   return <>
-    <label>Deal pipeline<select name="pipelineId" value={selected} onChange={event=>setSelected(event.target.value)}>
+    {!stageEditable&&existing&&<input type="hidden" name="pipelineId" value={selected}/>}
+    {!stageEditable&&<input type="hidden" name="stageSelection" value={fixedStage}/>}
+    <label>Deal pipeline<select disabled={!stageEditable&&existing} name="pipelineId" value={selected} onChange={event=>setSelected(event.target.value)}>
       {pipelines.map(pipeline=><option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
     </select></label>
-    <label>Deal stage<select key={selected} name="stageSelection" defaultValue={selected===pipelineId?stage:undefined}>
+    <label>Deal stage<select key={selected} name="stageSelection" disabled={!stageEditable} defaultValue={stageEditable?(selected===pipelineId?stage:undefined):fixedStage}>
       {options.map(option=><option key={option.id} value={option.id}>{option.name}</option>)}
     </select></label>
   </>;
@@ -47,7 +50,7 @@ const initialDraft=():Draft=>({name:'',stages:[
   {name:'Closed lost',outcome:'lost',probability:portableStageProbability('lost')},
 ]});
 
-export function PortablePipelineSettings({pipelines,customProperties}:{pipelines:DealPipeline[];customProperties:PortableCustomProperty[]}){
+export function PortablePipelineSettings({pipelines,customProperties,initiallyOpen=false}:{pipelines:DealPipeline[];customProperties:PortableCustomProperty[];initiallyOpen?:boolean}){
   const requiredFields=portableDealStageFields(customProperties);
   const router=useRouter();
   const [draft,setDraft]=useState<Draft>();
@@ -96,7 +99,7 @@ export function PortablePipelineSettings({pipelines,customProperties}:{pipelines
     finally{setSaving(false);}
   }
 
-  return <details className="portable-pipeline-settings">
+  return <details className="portable-pipeline-settings" open={initiallyOpen||undefined}>
     <summary>Deal pipeline settings</summary>
     <p><strong>Sales pipeline</strong> is built in. Add a pipeline to define your own stages.</p>
     <p>Start with an open stage and include at least one won and one lost stage.</p>

@@ -80,7 +80,13 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
     assert.equal(response.status,record?200:201,await response.clone().text());
     return (await response.json()).record;
   };
-  const criteria={groups:[[{field:'name',operator:'contains',value:marker},{field:'lifecycle',operator:'eq',value:'Other'}]]};
+  const includesName=value=>({field:'name',operator:'contains',value});
+  const inStage=value=>({field:'lifecycle',operator:'eq',value});
+  const criteria={groups:[
+    [includesName(marker),inStage('Other')],
+    [includesName(marker+' entrant'),inStage('Other')],
+    [includesName(marker+' entrant'),inStage('Opportunity')],
+  ]};
   const segment={id:segmentId,revision:0,name:marker,kind:'contacts',mode:'active',criteria};
   assert.equal((await post('/api/segments',{action:'save',segment})).status,201);
   const definition={name:marker,trigger:'contact_segment',segmentId,delayMinutes:5,body:'Review this fictional segment entry.'};
@@ -89,7 +95,7 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
   assert.equal((await post(workflows,draft)).status,200);
   const savedPage=await request('/?view=workflows',{headers});
   assert.equal(savedPage.status,200);
-  assert.match(await savedPage.text(),/Contact joins an active segment/);
+  assert.match(await savedPage.text(),/Contact joins an active list/);
   for(let index=0;index<26;index++)await saveContact(marker+' existing '+index,'Other');
   const entrant=await saveContact(marker+' entrant','Lead');
   await saveContact(marker+' foreign','Other',undefined,other);
@@ -99,7 +105,7 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
   assert.equal((await post(workflows,{action:'setEnabled',id,revision:1,enabled:true},other)).status,404);
   assert.equal((await post(workflows,{action:'setEnabled',id,revision:1,enabled:true})).status,200);
   const baselinePage=await request('/?view=workflows',{headers});
-  assert.match(await baselinePage.text(),/Building segment baseline/);
+  assert.match(await baselinePage.text(),/Checking initial list membership/);
   const overdueAt=Date.now()-6*60_000;
   await sql`UPDATE portable_segment_workflow_scans SET next_at=${overdueAt} WHERE workflow_id=${id}`;
   await worker(env);
@@ -110,7 +116,7 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
   assert.ok(Number(partialTiming.next_at)>overdueAt+5*60_000,'The next page has a fresh deadline.');
   assert.equal(Number(partialTiming.cycle_due_at),overdueAt,'The unfinished cycle retains its original deadline.');
   assert.deepEqual(await monitorSegments(env),{result:'attention',overdue:true});
-  assert.match(await (await request('/?view=workflows',{headers})).text(),/Segment check overdue/);
+  assert.match(await (await request('/?view=workflows',{headers})).text(),/List check overdue/);
   const [pageBound]=await sql`SELECT count(*)::int AS count FROM contacts WHERE workspace_id=(
     SELECT workspace_id FROM portable_segment_workflow_scans WHERE workflow_id=${id}) AND id<=${firstPage.cursor}`;
   assert.equal(pageBound.count,25);
@@ -118,7 +124,7 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
   const [finishedTiming]=await sql`SELECT cycle_due_at FROM portable_segment_workflow_scans WHERE workflow_id=${id}`;
   assert.equal(finishedTiming.cycle_due_at,null);
   assert.deepEqual(await monitorSegments(env),{result:'ok',overdue:false});
-  assert.doesNotMatch(await (await request('/?view=workflows',{headers})).text(),/Segment check overdue/);
+  assert.doesNotMatch(await (await request('/?view=workflows',{headers})).text(),/List check overdue/);
   assert.equal((await receipts(sql,id)).length,0);
 
   const scanCycle=()=>scanAllPages(sql,id,env);
@@ -141,8 +147,8 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
     assert.deepEqual(await monitorSegments(env),{result:'attention',overdue:true});
     const capacityPage=await (await request('/?view=workflows',{headers})).text();
     assert.match(capacityPage,/Waiting for job queue capacity/);
-    assert.match(capacityPage,/Segment check overdue/);
-    assert.doesNotMatch(capacityPage,/Retrying failed segment check/);
+    assert.match(capacityPage,/List check overdue/);
+    assert.doesNotMatch(capacityPage,/Retrying failed list check/);
     await sql`UPDATE portable_segment_workflow_scans SET retry_at=0 WHERE workflow_id=${id}`;
     await worker(env);
     const blockedAgain=await scanTiming();
@@ -150,6 +156,11 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
     assert.ok(Number(blockedAgain.retry_at)>Date.now());
     assert.deepEqual(await monitorSegments(env),{result:'attention',overdue:true});
     const [beforeRename]=await sql`SELECT * FROM portable_segment_workflow_scans WHERE workflow_id=${id}`;
+    for(const shared of [true,false]){
+      assert.equal((await post('/api/segments',{action:'share',id:segment.id,revision:1,shared})).status,200);
+      const [unchanged]=await sql`SELECT * FROM portable_segment_workflow_scans WHERE workflow_id=${id}`;
+      assert.deepEqual(unchanged,beforeRename,'Changing who can view the list preserves the pending workflow scan.');
+    }
     assert.equal((await post('/api/segments',{action:'save',segment:{...segment,revision:1,name:marker+' renamed'}})).status,200);
     const [afterRename]=await sql`SELECT * FROM portable_segment_workflow_scans WHERE workflow_id=${id}`;
     assert.deepEqual({...afterRename},{...beforeRename,segment_revision:2},
@@ -169,7 +180,10 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
   assert.equal((await scanTiming()).retry_at,null);
   assert.equal((await progress(sql,id))[0].waiting_for_capacity,false);
   assert.deepEqual(await monitorSegments(env),{result:'ok',overdue:false});
-  const left=await saveContact(joined.data.name,'Lead',joined);
+  const stillInList=await saveContact(joined.data.name,'Opportunity',joined);
+  await scanCycle();
+  assert.equal((await receipts(sql,id)).length,1,'Moving between qualifying groups keeps the same enrollment.');
+  const left=await saveContact(joined.data.name,'Lead',stillInList);
   await scanCycle();
   const returned=await saveContact(left.data.name,'Other',left);
   await scanCycle();
@@ -272,7 +286,7 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
       'The healthy workspace ready before this expired retry takes the next turn.');
     assert.equal(Number((await scanTiming()).retry_at),2,'The failed page has not been retried ahead of healthy work.');
     const retryPage=await (await request('/?view=workflows',{headers})).text();
-    assert.match(retryPage,/Retrying failed segment check/);
+    assert.match(retryPage,/Retrying failed list check/);
     assert.doesNotMatch(retryPage,/Waiting for job queue capacity/);
   }finally{
     await sql.unsafe('DROP TRIGGER harbor_fixture_segment_page_failure ON portable_segment_workflow_scans; DROP FUNCTION harbor_fixture_segment_page_failure()').simple();
@@ -294,7 +308,7 @@ export async function verifyPortableSegmentWorkflow({request,origin,headers,othe
   const recoveredReceipts=await receipts(sql,id);
   assert.equal(recoveredReceipts.length,finalReceipts.length+1);
   assert.equal(recoveredReceipts.find(row=>row.id===retried.id).status,'succeeded');
-  assert.doesNotMatch(await (await request('/?view=workflows',{headers})).text(),/Retrying failed segment check/);
+  assert.doesNotMatch(await (await request('/?view=workflows',{headers})).text(),/Retrying failed list check/);
   assert.equal((await post(workflows,{action:'setEnabled',id:otherWorkflowId,revision:2,enabled:false},other)).status,200);
 
   // An owner can revise the workflow without erasing its prior admissions.

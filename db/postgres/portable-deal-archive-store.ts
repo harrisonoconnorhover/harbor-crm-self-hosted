@@ -7,6 +7,7 @@ import {portableJobs as jobs} from './job-schema';
 import {uncertainGmailIssues} from './job-store';
 import {lockRecordWorkspace} from './private-workspace-store';
 import type {SharedRecordWriteScope} from '../../lib/portable-workspace-access';
+import {ownedRecordScope} from './record-ownership-scope';
 import {archiveAccessError,archivedByLabel,archiveWorkspaceScope} from './portable-archive-scope';
 import {dealWorkflowRuns as runs} from './workflow-schema';
 import {privateWorkspaces} from './workspace-schema';
@@ -20,7 +21,7 @@ export async function readPortableDealArchive(db:Db,actorId:string,after?:string
   const rows=await db.select({id:deals.id,name:sql<string>`${deals.data}->>'name'`,revision:deals.revision,archivedAt:deals.archivedAt,
     archivedBy:archivedByLabel(dealEvents,dealEvents.dealId,deals.id,deals.workspaceId,deals.revision)})
     .from(deals).innerJoin(privateWorkspaces,eq(privateWorkspaces.id,deals.workspaceId))
-    .where(and(archiveWorkspaceScope(db,actorId,shared),isNotNull(deals.archivedAt),after?gt(deals.id,after):undefined))
+    .where(and(archiveWorkspaceScope(db,actorId,shared,deals),isNotNull(deals.archivedAt),after?gt(deals.id,after):undefined))
     .orderBy(asc(deals.id)).limit(pageSize+1);
   const records:PortableArchivedRecord[]=rows.slice(0,pageSize).map(row=>({...row,archivedAt:at(row.archivedAt)!}));
   return {records,next:rows.length>pageSize?records.at(-1)!.id:null};
@@ -29,7 +30,7 @@ export async function readPortableDealArchive(db:Db,actorId:string,after?:string
 export async function isPortableDealArchived(db:Db,actorId:string,id:string){
   const [record]=await db.select({id:deals.id}).from(deals)
     .innerJoin(privateWorkspaces,eq(privateWorkspaces.id,deals.workspaceId))
-    .where(and(archiveWorkspaceScope(db,actorId),eq(deals.id,id),isNotNull(deals.archivedAt))).limit(1);
+    .where(and(eq(privateWorkspaces.ownerId,actorId),eq(deals.id,id),isNotNull(deals.archivedAt))).limit(1);
   return Boolean(record);
 }
 
@@ -51,9 +52,12 @@ async function pendingDealWork(tx:Tx,workspaceId:string,dealId:string){
 export function changePortableDealArchive(db:Db,actorId:string,input:PortableArchiveInput,shared?:SharedRecordWriteScope):Promise<PortableArchiveReceipt>{
   return db.transaction(async tx=>{
     // Link writers, line items and quote/invoice drafts take this lock before checking that a Deal is active.
-    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true);
+    const workspaceId=await lockRecordWorkspace(tx,actorId,false,shared,undefined,true,true,['deals','delete']);
     if(!workspaceId)throw shared?new ApiError(403,archiveAccessError):new ApiError(404,'Deal not found in your workspace.');
     const {id,requestId,expectedRevision,action}=input;
+    const scope=and(eq(deals.workspaceId,workspaceId),eq(deals.id,id),shared?ownedRecordScope(tx,actorId,workspaceId,deals,'edit'):undefined);
+    const [deal]=await tx.select().from(deals).where(scope).for('update');
+    if(!deal)throw new ApiError(404,'Deal not found in your workspace.');
     const [previous]=await tx.select().from(receipts).where(and(eq(receipts.workspaceId,workspaceId),eq(receipts.requestId,requestId)));
     if(previous){
       if(previous.dealId!==id||previous.action!==action||previous.revision!==expectedRevision+1){
@@ -61,9 +65,6 @@ export function changePortableDealArchive(db:Db,actorId:string,input:PortableArc
       }
       return {id,action,revision:previous.revision,archivedAt:at(previous.archivedAt)};
     }
-    const scope=and(eq(deals.workspaceId,workspaceId),eq(deals.id,id));
-    const [deal]=await tx.select().from(deals).where(scope).for('update');
-    if(!deal)throw new ApiError(404,'Deal not found in your workspace.');
     if(deal.revision!==expectedRevision||Boolean(deal.archivedAt)!==(action==='restore')){
       throw new ApiError(409,'This Deal changed. Refresh before trying again.');
     }

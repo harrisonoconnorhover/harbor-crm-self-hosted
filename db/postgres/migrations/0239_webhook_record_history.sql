@@ -1,0 +1,1 @@
+CREATE INDEX "portable_webhook_record_history" ON "portable_webhook_deliveries" USING btree ("workspace_id","object_kind","record_id","occurred_at" DESC NULLS LAST,"id" DESC NULLS LAST);
