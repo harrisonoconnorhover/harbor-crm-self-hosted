@@ -13,6 +13,11 @@
 !scripts/
 !scripts/check-standalone.mjs
 !lib/
-!lib/public-pilot-contact.mjs
+!lib/**/
+!lib/**/*.ts
+!lib/**/*.mjs
+!db/
+!db/postgres/
+!db/postgres/*.ts
 !runtime/
 !runtime/portable-invitation-acceptance.ts

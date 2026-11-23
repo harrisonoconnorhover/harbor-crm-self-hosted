@@ -347,6 +347,11 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       assert.ok(retryHtml.includes('href="/auth/google/start?return_to='+encodeURIComponent(retryDestination)+'"'));
       const headers=await signIn('owner@example.test');
       const other=await signIn('other@example.test');
+      if(process.env.HARBOR_TEST_SALES_WEEK==='true'){
+        const {verifySalesWeek}=await import('./portable-sales-week-fixture.mjs');
+        await verifySalesWeek({env,mock,request,origin,headers,other,signIn,fixture,directory});
+        return;
+      }
       if(pool){
         const {exercisePooledWorkspace}=await import('./portable-pool-fixture.mjs');
         await exercisePooledWorkspace({pool,sql,request,origin,headers,other,fixture,env});

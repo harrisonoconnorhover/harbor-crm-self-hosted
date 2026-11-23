@@ -24,6 +24,19 @@ bash scripts/local-test.sh portable
 
 The end-to-end suite starts PostgreSQL, simulated identity and mail providers, and private test file storage inside a network-isolated container. It checks sign-in, workspace permissions, the web app, background jobs and a second-instance recovery. Allow about 15 minutes after the build.
 
+### Rehearse a fictional sales week
+
+Follow two reps and their manager from CSV import through a shared deal, a forecast review, offboarding and recovery of a private attachment on a second instance. This local rehearsal uses simulated identities and disposable storage.
+
+On macOS or Linux, use Node 22.13 or later, OpenSSL, PostgreSQL 18 client tools, and Playwright with Chromium. Run as a regular user. If the PostgreSQL tools are outside your PATH, set `HARBOR_TEST_PG_BIN` to their bin directory. For an existing Playwright installation, set `HARBOR_TEST_PLAYWRIGHT` to its absolute `index.mjs` path. Set `HARBOR_TEST_CHROME` if using a separately installed Chrome executable.
+
+```sh
+npm ci
+npm ci --prefix tests/portable-fixtures
+npm run build:portable
+node tests/portable-fixtures/run.mjs --sales-week
+```
+
 ## Dependency status
 
 Run `npm audit --omit=dev` for the production dependency tree and `npm audit --include=dev` for the build toolchain. The Dockerfile bundles the production HTTP server and removes the development dependencies from the runtime image. Build from source and configuration you trust.

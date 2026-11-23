@@ -144,6 +144,7 @@ try{
     ['--teams', [web]],
     ['--booking', [web]],
     ['--recovery', [web]],
+    ['--sales-week', [web]],
     ['--custom-objects', [web]],
     ['--team-inbox', [web]],
     ['--webhooks', [web]],
@@ -181,7 +182,7 @@ try{
       .map(name=>'tests/portable-marketing-'+name+'.test.mjs')],
   ]);
   const suites=suitesByMode.get(mode);
-  if(!suites)throw Error('Choose --recovery, --saml, --keycloak, --directory, --team-upgrade, --marketing, --campaign-replicas, --teams, --booking, --help-center, --landing-pages, --custom-objects, --team-inbox, --web-attribution, --first-response, --access-history, --webhooks, --workflow-webhooks, --ticket-workflows, --company-workflows, --custom-record-workflows, --external-writes, --quote-signing, --contact-archive, --file-access, --file-search, --record-list-search, --inquiry-search, --commerce-search, --stripe-invoices, --aircall, --lists, --settings, --navigation, --branch-steps, --conditional-paths, --deal-tasks, --sales-sequences, --record-reporting, --pool or --search for a focused rehearsal.');
+  if(!suites)throw Error('Choose --sales-week, --recovery, --saml, --keycloak, --directory, --team-upgrade, --marketing, --campaign-replicas, --teams, --booking, --help-center, --landing-pages, --custom-objects, --team-inbox, --web-attribution, --first-response, --access-history, --webhooks, --workflow-webhooks, --ticket-workflows, --company-workflows, --custom-record-workflows, --external-writes, --quote-signing, --contact-archive, --file-access, --file-search, --record-list-search, --inquiry-search, --commerce-search, --stripe-invoices, --aircall, --lists, --settings, --navigation, --branch-steps, --conditional-paths, --deal-tasks, --sales-sequences, --record-reporting, --pool or --search for a focused rehearsal.');
   if(mode==='--team-upgrade'&&!isAbsolute(process.env.HARBOR_TEST_UPGRADE_BUNDLE??''))throw Error('Set HARBOR_TEST_UPGRADE_BUNDLE to the absolute path of a local pre-team backup.');
   checkPrerequisites();
   if(mode==='--pool'&&spawnSync(process.env.HARBOR_TEST_PGBOUNCER||'pgbouncer',['--version'],{stdio:'ignore',timeout:3000}).status!==0){
@@ -195,7 +196,7 @@ try{
   // The load rehearsals seed at least 200,000 records. Recycle their temporary WAL more frequently.
   const source=await fixture(root,'harbor_identity_test',certificate,binaries,['--pool','--search'].includes(mode)?['-c','max_wal_size=128MB']:[]);
   if(!interrupted){
-    const needsRestore=!mode||mode==='--quote-signing'||mode==='--recovery';
+    const needsRestore=!mode||mode==='--quote-signing'||mode==='--recovery'||mode==='--sales-week';
     const target=needsRestore?await fixture(root,'harbor_restore_test',certificate,binaries):source;
     if(!interrupted){
       child=spawn(process.execPath,['--test','--test-concurrency=2',...suites],{cwd,stdio:'inherit',detached:true,env:{
@@ -206,7 +207,7 @@ try{
         HARBOR_TEST_RESTORE_POSTGRES_URL:target.db,HARBOR_TEST_RESTORE_S3_ENDPOINT:target.s3,
         HARBOR_TEST_HOSTED_S3_ENDPOINT:source.secureS3,HARBOR_TEST_HOSTED_RESTORE_S3_ENDPOINT:target.secureS3,
         HARBOR_TEST_RESTORE_POSTGRES_SSLMODE:'verify-full',
-        ...(['--search','--lists','--team-upgrade','--contact-archive','--file-access','--commerce-search','--access-history','--saml','--keycloak','--directory','--teams','--booking','--help-center','--landing-pages','--first-response','--team-inbox','--sales-sequences','--marketing','--web-attribution','--external-writes','--quote-signing','--stripe-invoices','--aircall','--custom-objects','--settings','--navigation','--branch-steps','--conditional-paths','--deal-tasks','--webhooks','--workflow-webhooks','--ticket-workflows','--company-workflows','--custom-record-workflows','--record-reporting'].includes(mode)?{HARBOR_TEST_PLAYWRIGHT:process.env.HARBOR_TEST_PLAYWRIGHT,HARBOR_TEST_CHROME:process.env.HARBOR_TEST_CHROME}:{}),
+        ...(['--sales-week','--search','--lists','--team-upgrade','--contact-archive','--file-access','--commerce-search','--access-history','--saml','--keycloak','--directory','--teams','--booking','--help-center','--landing-pages','--first-response','--team-inbox','--sales-sequences','--marketing','--web-attribution','--external-writes','--quote-signing','--stripe-invoices','--aircall','--custom-objects','--settings','--navigation','--branch-steps','--conditional-paths','--deal-tasks','--webhooks','--workflow-webhooks','--ticket-workflows','--company-workflows','--custom-record-workflows','--record-reporting'].includes(mode)?{HARBOR_TEST_PLAYWRIGHT:process.env.HARBOR_TEST_PLAYWRIGHT,HARBOR_TEST_CHROME:process.env.HARBOR_TEST_CHROME}:{}),
         ...(mode==='--pool'?{HARBOR_TEST_POOL:'true',HARBOR_TEST_PGBOUNCER:process.env.HARBOR_TEST_PGBOUNCER||'pgbouncer'}:{}),
         HARBOR_TEST_CAMPAIGN_REPLICAS:String(mode==='--campaign-replicas'),
         HARBOR_TEST_KEYCLOAK:String(mode==='--keycloak'),
@@ -230,6 +231,7 @@ try{
         HARBOR_TEST_AIRCALL:String(mode==='--aircall'),
         HARBOR_TEST_STRIPE_INVOICES:String(mode==='--stripe-invoices'),
         HARBOR_TEST_LISTS:String(mode==='--lists'),
+        HARBOR_TEST_SALES_WEEK:String(mode==='--sales-week'),
         HARBOR_TEST_SETTINGS:String(mode==='--settings'),
         HARBOR_TEST_NAVIGATION:String(mode==='--navigation'),
         HARBOR_TEST_BRANCH_STEPS:String(mode==='--branch-steps'),
