@@ -2,9 +2,19 @@
 
 Harbor is a self-hosted CRM for teams. Manage contacts, companies, deals and tasks, share a pipeline and dashboards, and keep record history and file attachments in your own workspace.
 
-## Install and try it
+## Try Harbor locally
 
-Follow the [self-host guide](docs/self-host.md) to build the Docker image, set up PostgreSQL 18, private S3-compatible storage and your sign-in provider, and invite a second user. The web app and optional Notes worker use the same image. The self-host guide explains how active teammates and pending invitations count toward the workspace seat limit.
+With Docker running, open a terminal in this checkout and run:
+
+```sh
+sh scripts/demo.sh
+```
+
+Open the local link the command prints and choose **Try as a sales rep**. Open the North Pier spring order, read its latest note, and complete the follow-up task. Return to the role chooser and open the same deal as the manager. The demo uses fictional accounts and keeps its data on your computer. To stop it and discard the demo workspace, run `sh scripts/demo.sh stop`.
+
+## Install for your team
+
+The [single-host installation guide](docs/team-install.md) sets up Harbor, PostgreSQL, private file storage, and HTTPS with Docker Compose. Bring a domain and your team's sign-in provider. If you already operate a database and bucket, follow the [existing infrastructure guide](docs/self-host.md).
 
 For a Microsoft 365 team or personal Outlook.com mailbox, the [Microsoft sign-in and Outlook guide](docs/microsoft-outlook.md) covers app registration, individual consent, and logging a selected email or completed meeting on a contact.
 

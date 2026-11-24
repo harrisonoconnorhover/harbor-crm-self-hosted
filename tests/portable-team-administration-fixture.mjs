@@ -178,18 +178,17 @@ export async function verifyPortableSeatCapacity({request,origin,headers,other,s
     return response.json();
   };
   const before=await list();
-  assert.equal(before.seatLimit,25);
+  assert.equal(before.seatLimit,null);
   const workspaceId=before.owned;
-  await restart('150');
   await sql`INSERT INTO login_identities(id,google_subject,email,created_at,updated_at)
-    SELECT gen_random_uuid()::text,'seat-test-'||n,'seat-test-'||lpad(n::text,3,'0')||'@example.test',0,0 FROM generate_series(1,149) AS n`;
+    SELECT gen_random_uuid()::text,'seat-test-'||n,'seat-test-'||lpad(n::text,3,'0')||'@example.test',0,0 FROM generate_series(1,150) AS n`;
   await sql`INSERT INTO portable_workspace_viewers(workspace_id,viewer_id,id,role)
     SELECT ${workspaceId},id,gen_random_uuid(),'editor' FROM login_identities WHERE google_subject LIKE 'seat-test-%'`;
   const full=await post(headers,{action:'invite',email:'other@example.test',role:'editor'});
   assert.equal(full.status,200);
   const directory=await full.json();
-  assert.equal(directory.viewers.length+directory.sent.length,150);
-  assert.equal(directory.seatLimit,150);
+  assert.equal(directory.viewers.length+directory.sent.length,151);
+  assert.equal(directory.seatLimit,null);
   const {parseCSV}=await tsImport('../lib/csv-import.ts',import.meta.url);
   async function exportedEmails(){
     const path='/api/workspaces?'+new URLSearchParams({view:'teammate-access',export:'csv',workspaceId});
@@ -201,16 +200,17 @@ export async function verifyPortableSeatCapacity({request,origin,headers,other,s
   assert.deepEqual(await exportedEmails(),directory.viewers.map(member=>member.email));
 
   const invite=directory.sent.find(item=>item.email==='other@example.test');
+  await restart('151');
   assert.equal((await post(headers,{action:'invite',email:'invitee@example.test'})).status,409);
   await restart('25');
   const lowered=await list();
   assert.equal(lowered.seatLimit,25);
-  assert.equal(lowered.viewers.length,149);
+  assert.equal(lowered.viewers.length,150);
   assert.equal(lowered.sent.length,1);
   const accepted=await post(other,{action:'accept_invite',id:invite.id});
   assert.equal(accepted.status,200,'A lower limit must honor an existing reservation.');
   const retained=(await list()).viewers;
-  assert.equal(retained.length,150);
+  assert.equal(retained.length,151);
   assert.deepEqual(await exportedEmails(),retained.map(member=>member.email));
   const {chromium}=await import(process.env.HARBOR_TEST_PLAYWRIGHT??'playwright');
   const browser=await chromium.launch({executablePath:process.env.HARBOR_TEST_CHROME});
@@ -222,11 +222,11 @@ export async function verifyPortableSeatCapacity({request,origin,headers,other,s
     await page.goto(origin+'/?view=workspaces#team-directory');
     const shown=page.locator('.portable-access-member > summary');
     const pages=page.getByRole('navigation',{name:'teammates pages'});
-    const lastRep='seat-test-149@example.test';
-    await pages.getByText('1–25 of 150',{exact:true}).waitFor();
+    const lastRep='seat-test-150@example.test';
+    await pages.getByText('1–25 of 151',{exact:true}).waitFor();
     assert.equal(await shown.count(),25);
-    for(let i=1;i<6;i++)await pages.getByRole('button',{name:'Next teammates'}).click();
-    await pages.getByText('126–150 of 150',{exact:true}).waitFor();
+    for(let i=1;i<7;i++)await pages.getByRole('button',{name:'Next teammates'}).click();
+    await pages.getByText('151–151 of 151',{exact:true}).waitFor();
     assert.ok(await shown.filter({hasText:lastRep}).isVisible());
     await pages.getByRole('button',{name:'Previous teammates'}).click();
     assert.equal(await shown.filter({hasText:lastRep}).count(),0);
@@ -234,26 +234,34 @@ export async function verifyPortableSeatCapacity({request,origin,headers,other,s
     await shown.filter({hasText:lastRep}).click();
     assert.equal(await page.getByLabel('Access for '+lastRep,{exact:true}).inputValue(),'editor');
     await page.getByRole('button',{name:'Clear search'}).click();
-    await pages.getByText('1–25 of 150',{exact:true}).waitFor();
+    await pages.getByText('1–25 of 151',{exact:true}).waitFor();
   }finally{await browser.close();}
   const routing=await request('/api/leads?view=routing',{headers});
   assert.equal(routing.status,200);
   const {members}=await routing.json();
-  assert.equal(members.length,150);
-  assert.equal(members.at(-1).label,'seat-test-149@example.test');
-  const contacts=await request('/',{headers});
-  assert.equal(contacts.status,200);
-  const filter=DomUtils.findOne(el=>el.name==='select'&&el.attribs.name==='owner',parseDocument(await contacts.text()).children);
+  assert.equal(members.length,151);
+  assert.equal(members.at(-1).label,'seat-test-150@example.test');
+  const deals=await request('/?kind=deals',{headers});
+  assert.equal(deals.status,200);
+  const filter=DomUtils.findOne(el=>el.name==='select'&&el.attribs.name==='owner',parseDocument(await deals.text()).children);
   assert.ok(filter);
   const choices=DomUtils.getElementsByTagName('option',filter.children);
-  const last=choices.find(el=>DomUtils.textContent(el)==='seat-test-149@example.test');
+  const last=choices.find(el=>DomUtils.textContent(el)==='seat-test-150@example.test');
   assert.ok(last,'The owner picker includes teammates beyond the first hundred, even after lowering the limit.');
   const saved=await request('/api/crm',{method:'POST',headers:{...headers,origin,'content-type':'application/json'},
-    body:JSON.stringify({action:'save',kind:'contacts',assigneeId:last.attribs.value,data:{name:'Fictional team handoff'}})});
+    body:JSON.stringify({action:'save',kind:'deals',assigneeId:last.attribs.value,data:{name:'Fictional team handoff',stage:'Qualified to buy'}})});
   assert.equal(saved.status,201,await saved.clone().text());
   const {record}=await saved.json();
-  const assigned=await request('/api/crm?id='+record.id,{headers});
+  const assigned=await request('/api/crm?kind=deals&id='+record.id,{headers});
   assert.equal(assigned.status,200);
   assert.equal((await assigned.json()).data.recordOwner.userId,last.attribs.value);
+  const joined=retained.find(member=>member.email==='other@example.test');
+  assert.ok(choices.some(el=>el.attribs.value===joined.actorId),'The newly admitted editor can receive deals.');
+  const handoff=await request('/api/crm',{method:'POST',headers:{...headers,origin,'content-type':'application/json'},
+    body:JSON.stringify({action:'save',kind:'deals',id:record.id,expectedRevision:record.revision,assigneeId:joined.actorId,data:{name:'Fictional team handoff',stage:'Qualified to buy'}})});
+  assert.equal(handoff.status,200,await handoff.clone().text());
+  const shared=await request('/api/crm?'+new URLSearchParams({kind:'deals',id:record.id,workspaceId}),{headers:other});
+  assert.equal(shared.status,200);
+  assert.equal((await shared.json()).data.recordOwner.userId,joined.actorId);
   assert.equal((await post(headers,{action:'invite',email:'invitee@example.test'})).status,409);
 }

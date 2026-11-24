@@ -1,5 +1,7 @@
 # Self-host Harbor
 
+This guide uses your existing PostgreSQL and S3-compatible storage. For a fresh server, use the [bundled team installation](team-install.md).
+
 Install Harbor on a **new, empty database**, then verify that two teammates can share a record. For an existing installation, [take a matched backup before upgrading](#back-up-and-recover).
 
 For Microsoft sign-in or personal Outlook connections, follow the [Microsoft sign-in and Outlook setup](microsoft-outlook.md).
@@ -76,7 +78,7 @@ Expect `ready`, then open your **public HTTPS address** and choose **Continue wi
 - Share a dashboard, open it from the teammate's workspace, then use **Find in Harbor** to find a shared record. On the owner's Contacts list use **Import / export** to preview a matched CSV update before applying it.
 - For a timed task, choose a reminder and open the reminder tray as its assignee. Reminders appear inside Harbor.
 
-The workspace limit is **25 active teammates and pending invitations combined**. Rehearse with your own expected record counts and number of simultaneous users.
+Workspaces have no seat limit by default. To cap active teammates plus pending invitations, set `HARBOR_WORKSPACE_SEAT_LIMIT` to a positive whole number on every web instance. The owner is separate. Rehearse with your own expected record counts and number of simultaneous users.
 
 ### Check that files are private
 

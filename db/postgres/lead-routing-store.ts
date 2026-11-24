@@ -17,7 +17,6 @@ import {assigneeLabel,canWorkLead} from './workspace-assignee-store';
 import {recordAccess,type RecordAccessActor} from './record-access-store';
 import {sharedWorkspaceGrant} from './workspace-viewer-store';
 import {readOwnedWorkspaceId,lockRecordWorkspace} from './private-workspace-store';
-import {maximumWorkspaceSeats} from '../../runtime/portable-config.mjs';
 
 type Tx=Parameters<Parameters<PostgresJsDatabase['transaction']>[0]>[0];
 const eligible=and(eq(members.role,'editor'),canWorkLead);
@@ -38,7 +37,7 @@ export async function readLeadRouting(db:PostgresJsDatabase,ownerId:string):Prom
     byCapacity:privateWorkspaces.balanceLeadsByCapacity,roundRobin:privateWorkspaces.roundRobinLeads})
     .from(privateWorkspaces).leftJoin(members,and(eq(privateWorkspaces.id,members.workspaceId),eligible))
     .leftJoin(loginIdentities,eq(loginIdentities.id,members.viewerId)).leftJoin(rules,memberRule)
-    .where(eq(privateWorkspaces.ownerId,ownerId)).orderBy(asc(loginIdentities.email)).limit(maximumWorkspaceSeats);
+    .where(eq(privateWorkspaces.ownerId,ownerId)).orderBy(asc(loginIdentities.email));
   const reps=rows.flatMap(({memberId,name,email,rule})=>{
     if(!memberId||!email)return [];
     const {available,awayThrough,country,additionalCountries,regions,capacity,timeZone,days,start,end}=rule??defaultRoutingRule;

@@ -7,7 +7,7 @@ import {readOwnedWorkspaceId} from './private-workspace-store';
 import {memberTeamPaths,readDirectoryTeams} from './workspace-team-store';
 import {and,asc,eq,exists,gt,ilike,inArray,ne,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
-import {maximumWorkspaceSeats,portableWorkspaceSeatLimit} from '../../runtime/portable-config.mjs';
+import {portableWorkspaceSeatLimit} from '../../runtime/portable-config.mjs';
 import type {RecordScope,SharedRecordWriteScope,WorkspacePermission,WorkspaceRole} from '../../lib/portable-workspace-access';
 import {recordSearchPattern} from './record-search';
 import {loginIdentities} from './identity-schema';
@@ -29,7 +29,7 @@ function workspaceDirectory(db:PostgresJsDatabase,workspaceId:string){
     .from(workspaceViewers).innerJoin(loginIdentities,eq(loginIdentities.id,workspaceViewers.viewerId))
     .leftJoin(directoryGroupMembers,and(eq(directoryGroupMembers.workspaceId,workspaceViewers.workspaceId),
       eq(directoryGroupMembers.userId,workspaceViewers.viewerId)))
-    .where(eq(workspaceViewers.workspaceId,workspaceId)).orderBy(asc(loginIdentities.email)).limit(maximumWorkspaceSeats);
+    .where(eq(workspaceViewers.workspaceId,workspaceId)).orderBy(asc(loginIdentities.email));
 }
 
 // Read the roster and its team paths at the same point in time, including when

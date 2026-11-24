@@ -30,6 +30,7 @@ HARBOR_LOGIN_GOOGLE_CLIENT_SECRET=
 HARBOR_LOGIN_ALLOWED_EMAILS=
 
 # Active teammates plus pending invitations per workspace (1 to 150).
+# Optional admission cap. Leave unset for unlimited teammates.
 # HARBOR_WORKSPACE_SEAT_LIMIT=25
 SETTINGS
 echo "Created $settings. Follow docs/self-host.md to configure the web app."

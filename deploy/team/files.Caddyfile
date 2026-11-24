@@ -1,0 +1,4 @@
+https://files {
+	tls internal
+	reverse_proxy objects:8333
+}

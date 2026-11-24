@@ -1,0 +1,85 @@
+name: harbor-team
+services:
+  postgres:
+    image: postgres:18-bookworm
+    restart: unless-stopped
+    env_file: .harbor/team/postgres.env
+    networks: [database]
+    volumes:
+      - postgres:/var/lib/postgresql
+      - ./deploy/team/initialize-db.sql:/docker-entrypoint-initdb.d/01-harbor.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "harbor", "-d", "harbor"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  objects:
+    image: chrislusf/seaweedfs:4.55
+    restart: unless-stopped
+    command: ["mini", "-dir=/data", "-ip=objects", "-bucket=harbor-files", "-s3.config=/etc/harbor/s3.json", "-admin.ui=false", "-master.telemetry=false"]
+    networks: [object_backend]
+    volumes:
+      - objects:/data
+      - ./.harbor/team/s3.json:/etc/harbor/s3.json:ro
+
+  files:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    networks: [object_backend, storage]
+    volumes:
+      - ./deploy/team/files.Caddyfile:/etc/caddy/Caddyfile:ro
+      - storage_tls:/data
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /data/caddy/pki/authorities/local/root.crt && wget -S -O /dev/null http://objects:8333/harbor-files 2>&1 | grep -q 'HTTP/1.1 403'"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  web:
+    image: ${HARBOR_IMAGE:?Initialize the team installation}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - .harbor/team/web.env
+      - .harbor/team/identity.env
+    environment:
+      HARBOR_PORTABLE_MODE: hosted
+      PORT: "8787"
+      NODE_EXTRA_CA_CERTS: /run/harbor/storage-ca.crt
+    volumes:
+      - ./.harbor/team/storage-ca.crt:/run/harbor/storage-ca.crt:ro
+    networks: [frontend, database, storage]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz',{signal:AbortSignal.timeout(8000)}).then(async r=>{if(!r.ok||await r.text()!=='ready')process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  gateway:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    networks: [frontend]
+    environment:
+      HARBOR_HOST: ${HARBOR_HOST:?Initialize the team installation}
+    ports:
+      - "${HARBOR_HTTP_BIND:-80}:80"
+      - "${HARBOR_HTTPS_BIND:-443}:443"
+    volumes:
+      - ./deploy/team/public.Caddyfile:/etc/caddy/Caddyfile:ro
+      - public_tls:/data
+
+networks:
+  frontend: {}
+  database:
+    internal: true
+  storage:
+    internal: true
+  object_backend:
+    internal: true
+
+volumes:
+  postgres:
+  objects:
+  storage_tls:
+  public_tls:

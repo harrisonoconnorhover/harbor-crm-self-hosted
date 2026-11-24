@@ -1,0 +1,8 @@
+**
+!tests/
+!tests/portable-fixtures/
+!tests/portable-fixtures/package.json
+!tests/portable-fixtures/package-lock.json
+!deploy/
+!deploy/demo/
+!deploy/demo/*.mjs

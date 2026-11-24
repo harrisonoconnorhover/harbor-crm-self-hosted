@@ -553,7 +553,7 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
           env.HARBOR_WORKSPACE_SEAT_LIMIT=limit;
           await start();
         }});
-        t.diagnostic('Verified 150 reserved seats, last-page record assignment and preservation of memberships and invitations after lowering the limit.');
+        t.diagnostic('Verified uncapped admission, deal assignment beyond 150 members, and existing reservations after an operator lowers the cap.');
         t.diagnostic('Verified directory hierarchy, assignment, concurrent moves, workspace isolation and revoke/rejoin.');
         return;
       }
@@ -1115,6 +1115,7 @@ test('Built Node web server isolates Postgres contacts and preserves sessions an
       sharing.sharedTicket=await verifyPortableTickets({request,origin,headers,other,sql,workspaceId:sharing.workspaceId,grantId:sharing.grantId,contact:restartedContact,
         company:updatedCompany,foreignContact:otherRecord,foreignCompany:otherCompany});
       sharing.outreach=await verifyPortableContactOutreach({request,origin,headers,other,record,otherRecord,sql,sharing});
+      await configure({HARBOR_WORKSPACE_SEAT_LIMIT:'25'});
       sharing.invitationId=await verifyPortableInvitations({request,origin,headers,other,signIn,sql,workspaceId:sharing.workspaceId});
       await verifyPortableBackupTeamAdministration({request,origin,headers,other,signIn,sql});
       await verifyPortableJobs({request,origin,headers,other,record,otherRecord,sql,env,directory});

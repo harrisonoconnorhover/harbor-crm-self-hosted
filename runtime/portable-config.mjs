@@ -49,11 +49,10 @@ export function portableStorageClientAddress(env,mode){
   return {endpoint:endpoint.href,forcePathStyle:env.HARBOR_S3_ADDRESSING!=='virtual-hosted'};
 }
 
-export const maximumWorkspaceSeats=150;
 export function portableWorkspaceSeatLimit(env){
   const raw=env.HARBOR_WORKSPACE_SEAT_LIMIT;
-  if(raw===undefined||raw==='')return 25;
-  if(!/^[1-9][0-9]*$/.test(raw)||Number(raw)>maximumWorkspaceSeats)throw Error('Set HARBOR_WORKSPACE_SEAT_LIMIT to a whole number from 1 to '+maximumWorkspaceSeats+'.');
+  if(raw===undefined||raw==='')return null;
+  if(!/^[1-9][0-9]*$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw Error('Set HARBOR_WORKSPACE_SEAT_LIMIT to a positive whole number.');
   return Number(raw);
 }
 

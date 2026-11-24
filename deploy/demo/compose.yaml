@@ -1,0 +1,36 @@
+name: harbor-evaluator
+services:
+  runtime:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    profiles: [build]
+  demo:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+      additional_contexts:
+        harbor-demo-runtime: service:runtime
+    init: true
+    environment:
+      HARBOR_DEMO_PORT: ${HARBOR_DEMO_PORT:-8793}
+    networks: [demo]
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:http').get({host:'127.0.0.1',port:8788,path:'/demo/ready',headers:{host:'127.0.0.1:'+process.env.HARBOR_DEMO_PORT}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      start_period: 90s
+      retries: 12
+  entrance:
+    image: caddy:2.11.9-alpine
+    command: ["caddy", "reverse-proxy", "--from", ":8788", "--to", "http://demo:8788", "--disable-redirects"]
+    depends_on:
+      demo:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${HARBOR_DEMO_PORT:-8793}:8788"
+    networks: [default, demo]
+networks:
+  default: {}
+  demo:
+    internal: true

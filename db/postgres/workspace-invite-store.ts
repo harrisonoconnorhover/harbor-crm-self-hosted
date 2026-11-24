@@ -4,7 +4,7 @@ import {readDirectoryTeams,teamAssignmentPolicy} from './workspace-team-store';
 import {workspaceTeams} from './workspace-team-schema';
 import {directoryManagesAddress} from './workspace-directory-access';
 import {fullRecordAccess,type MemberRecordAccess,type WorkspaceRole} from '../../lib/portable-workspace-access';
-import {maximumWorkspaceSeats,portableWorkspaceSeatLimit} from '../../runtime/portable-config.mjs';
+import {portableWorkspaceSeatLimit} from '../../runtime/portable-config.mjs';
 import {and,asc,eq,exists,gt,inArray,lte,ne,notExists,sql} from 'drizzle-orm';
 import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import {loginIdentities} from './identity-schema';
@@ -25,11 +25,13 @@ async function checkInvitationTeam(tx:Transaction,workspaceId:string,teamId:stri
 }
 
 export async function workspaceHasRoom(tx:Transaction,workspaceId:string){
+  const limit=portableWorkspaceSeatLimit(process.env);
+  if(limit===null)return true;
   const [row]=await tx.select({used:sql<number>`(
     (SELECT count(*) FROM ${workspaceViewers} WHERE ${workspaceViewers.workspaceId}=${workspaceId}) +
     (SELECT count(*) FROM ${workspaceInvites} WHERE ${workspaceInvites.workspaceId}=${workspaceId} AND ${activeInvite})
   )::int`}).from(privateWorkspaces).where(eq(privateWorkspaces.id,workspaceId));
-  return row.used<portableWorkspaceSeatLimit(process.env);
+  return row.used<limit;
 }
 
 function addressedInvitations(db:PostgresJsDatabase,actorId:string,email:string,ownerEmails?:string[],id?:string){
@@ -64,7 +66,7 @@ export async function workspaceInvitations(db:PostgresJsDatabase,actorId:string,
 
 export function workspaceSentInvitations(db:PostgresJsDatabase,workspaceId:string){
   return db.select({id:workspaceInvites.id,email:workspaceInvites.email,teamId:workspaceInvites.teamId,teamName:workspaceTeams.name,viewScope:workspaceInvites.viewScope,editScope:workspaceInvites.editScope,role:workspaceInvites.role,expiresAt:workspaceInvites.expiresAt}).from(workspaceInvites).leftJoin(workspaceTeams,inviteTeam)
-    .where(and(eq(workspaceInvites.workspaceId,workspaceId),activeInvite)).orderBy(asc(workspaceInvites.email)).limit(maximumWorkspaceSeats);
+    .where(and(eq(workspaceInvites.workspaceId,workspaceId),activeInvite)).orderBy(asc(workspaceInvites.email));
 }
 
 export async function prepareWorkspaceInvitation(db:PostgresJsDatabase,actorId:string,email:string,role:WorkspaceRole,access:MemberRecordAccess=fullRecordAccess,teamId:string|null=null,delegated=false){

@@ -5,7 +5,6 @@ import type {PostgresJsDatabase} from 'drizzle-orm/postgres-js';
 import type {PortableRecordOwner} from '../../lib/portable-records';
 import {ownedRecordScope} from './record-ownership-scope';
 import {loginIdentities} from './identity-schema';
-import {maximumWorkspaceSeats} from '../../runtime/portable-config.mjs';
 import {privateWorkspaces} from './workspace-schema';
 import {workspaceViewers} from './workspace-viewer-schema';
 
@@ -81,7 +80,7 @@ export async function portableWorkspaceAssignees(db:PostgresJsDatabase,actorId:s
         const forRecordList=tool==='contacts'||tool==='companies'||tool==='deals';
         const members=await tx.select({...identityColumns,...(forRecordList&&recipient?{canReceive:recipient}:{})}).from(loginIdentities).innerJoin(workspaceViewers,eq(workspaceViewers.viewerId,loginIdentities.id))
           .where(and(eq(workspaceViewers.workspaceId,workspaceId),eq(workspaceViewers.role,'editor'),forRecordList?undefined:recipient,eligible))
-          .orderBy(asc(loginIdentities.fullName),asc(loginIdentities.email),asc(loginIdentities.id)).limit(maximumWorkspaceSeats);
+          .orderBy(asc(loginIdentities.fullName),asc(loginIdentities.email),asc(loginIdentities.id));
         return members.map(member=>({id:member.id,label:assigneeLabel(member),canReceive:member.canReceive}));
       }
     }
@@ -100,7 +99,7 @@ export async function portableWorkspaceAssignees(db:PostgresJsDatabase,actorId:s
       .innerJoin(loginIdentities,eq(loginIdentities.id,workspaceViewers.viewerId))
       .where(and(eq(workspaceViewers.workspaceId,owner.workspaceId),eq(workspaceViewers.role,'editor'),
         recipient))
-      .orderBy(asc(loginIdentities.fullName),asc(loginIdentities.email),asc(loginIdentities.id)).limit(maximumWorkspaceSeats);
+      .orderBy(asc(loginIdentities.fullName),asc(loginIdentities.email),asc(loginIdentities.id));
     return [{...owner,canClaim:true,canTakeTicket:true},...editors].map(member=>({id:member.id,
       ...(eligibility==='inbox'?{canClaim:member.canClaim,canTakeTicket:member.canTakeTicket}:{}),
       label:eligibility&&member.name?.trim()?member.name.trim()+' ('+member.email+')':assigneeLabel(member)}));

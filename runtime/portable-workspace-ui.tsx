@@ -21,7 +21,7 @@ import './portable-settings.css';
 import './portable-workspace-directory.css';
 
 type ManagedDirectory=SharedRecordWriteScope&{ownerEmail:string;permissions:Record<WorkspacePermission,boolean>};
-export type WorkspaceSharing={owned:string|null;managed?:ManagedDirectory;inviteSignIn?:boolean;seatLimit:number;teams:DirectoryTeam[];directoryGroupMappings?:DirectoryGroupMapping[];oidcGroupMappings?:DirectoryGroupMapping[];samlGroupMappings?:DirectoryGroupMapping[];viewers:(MemberRecordAccess&{toolPolicies?:ToolPolicies;id:string;actorId:string;teamId?:string|null;directoryTeamManaged?:boolean;email:string;role:WorkspaceRole;backupAdmin:boolean;contactFiles:boolean;scheduledNotes:boolean;contactOutreach:boolean;recordActivities:boolean})[];
+export type WorkspaceSharing={owned:string|null;managed?:ManagedDirectory;inviteSignIn?:boolean;seatLimit:number|null;teams:DirectoryTeam[];directoryGroupMappings?:DirectoryGroupMapping[];oidcGroupMappings?:DirectoryGroupMapping[];samlGroupMappings?:DirectoryGroupMapping[];viewers:(MemberRecordAccess&{toolPolicies?:ToolPolicies;id:string;actorId:string;teamId?:string|null;directoryTeamManaged?:boolean;email:string;role:WorkspaceRole;backupAdmin:boolean;contactFiles:boolean;scheduledNotes:boolean;contactOutreach:boolean;recordActivities:boolean})[];
   sharedNext?:string|null;shared:{id:string;ownerEmail:string;role:WorkspaceRole;meetingsVisible?:boolean;grantId:string;backupAdmin:boolean}[];
   sent:(MemberRecordAccess&{id:string;email:string;teamId?:string|null;teamName?:string|null;role:WorkspaceRole;expiresAt:string})[];incoming:(MemberRecordAccess&{id:string;ownerEmail:string;teamName?:string|null;role:WorkspaceRole;expiresAt:string})[]};
 type Change=ToolChange|TeamChange|DirectoryGroupChange|{action:'grant';email:string}|({action:'invite';email:string;teamId?:string;role:WorkspaceRole}&MemberRecordAccess)|({action:'record_scope';id:string}&MemberRecordAccess)|{action:'revoke'|'cancel_invite';id:string}|
@@ -381,7 +381,7 @@ export function PortableWorkspaceSharing({guest=false,expanded=false,initial,sco
         view:'teammate-access',export:'csv',workspaceId:sharing.owned,
       })}>Export all active teammates’ access (CSV)</a>}
       {expanded&&sharing.owned&&(sharing.directoryGroupMappings||sharing.samlGroupMappings||sharing.oidcGroupMappings)&&<DirectoryEmployeeLookup teams={directoryTeams}/>}
-      <p className="portable-access-count">{sharing.viewers.length+sharing.sent.length} of {sharing.seatLimit} teammate places used, including pending invitations.</p>
+      <p className="portable-access-count">{sharing.viewers.length} active {sharing.viewers.length===1?'teammate':'teammates'} · {sharing.sent.length} pending {sharing.sent.length===1?'invitation':'invitations'}{sharing.seatLimit!==null&&<> · Seat limit {sharing.seatLimit}</>}</p>
       {sharing.viewers.length+sharing.sent.length>0&&<div className="portable-access-search">
         <label>Find a teammate<input type="search" placeholder="Search by email" value={query} onChange={event=>setQuery(event.target.value)}/></label>
         {directoryTeams.length>0&&<label>Filter by primary team<select value={filterTeam} onChange={event=>setTeamFilter(event.target.value)}>

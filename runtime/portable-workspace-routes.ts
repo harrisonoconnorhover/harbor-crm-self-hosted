@@ -141,7 +141,7 @@ async function workspaceRoute(request:Request){
           if(result==='directory_managed')return json({error:'This employee’s access is managed by the company directory.'},409);
           if(result==='no_account')return json({error:'That account has not signed in or cannot be identified. You can prepare an invitation.'},404);
           if(result==='role_conflict')return json({error:'An invitation with different access is pending. Review or cancel it before inviting again.'},409);
-          if(result==='full')return json({error:'This workspace already has '+portableWorkspaceSeatLimit(process.env)+' teammates and pending invitations.'},409);
+          if(result==='full')return json({error:'This workspace has reached its configured limit of '+portableWorkspaceSeatLimit(process.env)+' active teammates and pending invitations.'},409);
           if(result==='pending')return json({error:'An invitation is already pending for this account.'},409);
           if(result==='already_shared')return json({error:'This account already has access.'},409);
         }else if(change.action==='tool_permissions'){
